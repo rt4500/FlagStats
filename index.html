@@ -73,6 +73,9 @@
   /* Prompt + buttons */
   .prompt{font-size:13px;font-weight:700;color:var(--ink);min-height:18px}
   .readout{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:10px;text-align:center}
+  .modeToggle{display:flex;gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:3px;margin-bottom:10px}
+  .modeToggle .mt{flex:1;padding:8px 6px;border-radius:8px;background:transparent;color:var(--muted);font-size:12px;font-weight:800;letter-spacing:.03em}
+  .modeToggle .mt.on{background:var(--panel3);color:var(--ink)}
   .readout .rv{font-family:var(--mono);font-weight:800;font-size:24px;line-height:1.1;margin-top:2px}
   .readout .rg{font-family:var(--mono);font-size:13px;color:var(--amber);font-weight:700;margin-top:2px}
   .promptSub{font-size:11px;color:var(--muted);margin-top:2px}
@@ -169,26 +172,28 @@ const store={
 let teams=store.load(LS_TEAMS,{});   // { teamName: {name, players:[{id,num,name}]} }
 let games=store.load(LS_GAMES,[]);   // [ game ]
 let activeId=store.load(LS_ACTIVE,null);
+let inputMode=store.load('fs_inputmode','field'); // 'field' | 'numeric'
+function setInputMode(m){ inputMode=m; store.save('fs_inputmode',m); render(); }
 function persist(){ store.save(LS_TEAMS,teams); store.save(LS_GAMES,games); store.save(LS_ACTIVE,activeId); }
 const uid=()=>Math.random().toString(36).slice(2,9);
 
-/* ---- Test rosters: 7 fictional nations, 15 players each ---- */
+/* ---- Test rosters: the 7 Nations Cup Prague teams, 15 placeholder players each ---- */
 const TEST_NUMS=[3,5,7,8,9,10,11,12,14,18,21,22,24,44,88];
 const TEST_POOLS={
- 'Switzerland':{f:['Lena','Mia','Sophie','Lara','Nora','Elin','Alina','Jana','Nina','Sara','Lea','Livia','Zoe','Anna','Nadia'],
-   l:['Meier','Keller','Müller','Huber','Baumann','Steiner','Brunner','Widmer','Frei','Kälin','Fischer','Marti','Roth','Graf','Suter']},
- 'Germany':{f:['Marie','Hannah','Emilia','Lina','Klara','Frida','Greta','Johanna','Paula','Ida','Merle','Antonia','Leni','Charlotte','Mila'],
-   l:['Schmidt','Weber','Wagner','Becker','Hoffmann','Schulz','Koch','Richter','Klein','Wolf','Neumann','Braun','Krüger','Lange','Fuchs']},
- 'Austria':{f:['Valentina','Magdalena','Katharina','Theresa','Julia','Marlene','Elena','Laura','Verena','Isabella','Nadine','Selina','Carina','Lisa','Sophie'],
-   l:['Gruber','Bauer','Wagner','Moser','Mayer','Berger','Pichler','Leitner','Wimmer','Egger','Winkler','Lang','Baumgartner','Reiter','Hofer']},
+ 'Ireland':{f:['Aoife','Saoirse','Niamh','Ciara','Róisín','Sinéad','Orla','Caoimhe','Aisling','Clíona','Gráinne','Sadhbh','Fiadh','Éabha','Méabh'],
+   l:['Murphy','Kelly',"O'Brien",'Ryan',"O'Sullivan",'Walsh','Byrne',"O'Connor",'Doyle','McCarthy','Gallagher','Kennedy','Lynch','Brennan','Fitzgerald']},
+ 'Finland':{f:['Aino','Emilia','Sofia','Venla','Ella','Helmi','Aada','Iida','Peppi','Siiri','Nea','Vilma','Enni','Sanni','Elli'],
+   l:['Korhonen','Virtanen','Mäkinen','Nieminen','Mäkelä','Hämäläinen','Laine','Heikkinen','Koskinen','Järvinen','Lehtonen','Saarinen','Salminen','Heinonen','Niemi']},
+ 'Sweden':{f:['Alva','Astrid','Ebba','Elsa','Freja','Maja','Saga','Signe','Tuva','Wilma','Agnes','Ingrid','Klara','Linnéa','Stina'],
+   l:['Andersson','Johansson','Karlsson','Nilsson','Eriksson','Larsson','Olsson','Persson','Svensson','Gustafsson','Lindberg','Bergström','Lundgren','Sandberg','Holm']},
+ 'Ukraine':{f:['Sofiia','Anastasiia','Mariia','Kateryna','Anna','Yuliia','Oksana','Iryna','Olena','Nataliia','Vira','Yana','Daria','Alina','Khrystyna'],
+   l:['Shevchenko','Kovalenko','Bondarenko','Tkachenko','Melnyk','Kravchenko','Boyko','Marchenko','Lysenko','Rudenko','Moroz','Tkachuk','Savchenko','Polishchuk','Kravets']},
+ 'Poland':{f:['Zuzanna','Julia','Maja','Zofia','Lena','Alicja','Maria','Oliwia','Hanna','Amelia','Aleksandra','Natalia','Wiktoria','Emilia','Antonina'],
+   l:['Nowak','Kowalska','Wiśniewska','Wójcik','Kowalczyk','Kamińska','Lewandowska','Zielińska','Szymańska','Woźniak','Dąbrowska','Kozłowska','Jankowska','Mazur','Kwiatkowska']},
  'Czechia':{f:['Tereza','Eliška','Anežka','Karolína','Barbora','Kristýna','Natálie','Adéla','Veronika','Klára','Markéta','Petra','Lucie','Zuzana','Nikola'],
    l:['Nováková','Svobodová','Dvořáková','Černá','Procházková','Kučerová','Veselá','Horáková','Marková','Pospíšilová','Benešová','Fialová','Sedláčková','Doležalová','Zemanová']},
- 'Great Britain':{f:['Grace','Amelia','Isla','Freya','Poppy','Daisy','Millie','Evie','Maya','Ruby','Chloe','Holly','Erin','Sophie','Lucy'],
-   l:['Smith','Jones','Taylor','Brown','Wilson','Evans','Roberts','Walker','Hughes','Green','Clarke','Hall','Wright','Baker','Turner']},
- 'France':{f:['Camille','Léa','Manon','Chloé','Inès','Jade','Louise','Emma','Sarah','Zoé','Clara','Juliette','Alice','Lucie','Anaïs'],
-   l:['Martin','Bernard','Dubois','Moreau','Laurent','Girard','Rousseau','Lefebvre','Fontaine','Garnier','Faure','Blanc','Henry','Roux','Colin']},
- 'Italy':{f:['Giulia','Sofia','Aurora','Alice','Ginevra','Emma','Chiara','Martina','Sara','Beatrice','Alessia','Francesca','Elena','Noemi','Viola'],
-   l:['Rossi','Russo','Ferrari','Esposito','Bianchi','Romano','Colombo','Ricci','Marino','Greco','Conti','Rizzo','Gallo','Costa','Fontana']},
+ 'Switzerland':{f:['Lena','Mia','Sophie','Lara','Nora','Elin','Alina','Jana','Nina','Sara','Lea','Livia','Zoe','Anna','Nadia'],
+   l:['Meier','Keller','Müller','Huber','Baumann','Steiner','Brunner','Widmer','Frei','Kälin','Fischer','Marti','Roth','Graf','Suter']},
 };
 function buildTestTeams(){
   const out={};
@@ -198,7 +203,11 @@ function buildTestTeams(){
   }
   return out;
 }
-function loadTestTeams(){ const t=buildTestTeams(); for(const k in t){ if(!teams[k]) teams[k]=t[k]; } persist(); }
+function loadTestTeams(){
+  // remove placeholder nations from an earlier version that aren't in this tournament
+  ['Germany','Austria','Great Britain','France','Italy'].forEach(n=>{ if(teams[n]) delete teams[n]; });
+  const t=buildTestTeams(); for(const k in t){ if(!teams[k]) teams[k]=t[k]; } persist();
+}
 
 /* ============================================================
    GAME LOGIC (event-sourced, tested separately)
@@ -469,7 +478,7 @@ function buildField(g,st,posSide){
     const pctY=((clientY-rect.top)/rect.height)*100;
     let yard=((bot-pctY)/span)*L; return Math.max(0,Math.min(L,Math.round(yard))); };
   let dragging=false;
-  const active=()=> isSpotStep()||isAdjust();
+  const active=()=> (isSpotStep()||isAdjust()) && inputMode==='field';
   const paint=(yard)=>{ if(isAdjust()){ ui.adjust.spot=yard; showAdjust(yard); } else showAt(yard); };
   const begin=(cy,e)=>{ if(!active())return; dragging=true; if(e&&e.pointerId!=null){try{f.setPointerCapture(e.pointerId);}catch(_){}} paint(yardFrom(cy)); };
   const move =(cy)=>{ if(!dragging)return; paint(yardFrom(cy)); };
@@ -512,10 +521,18 @@ function buildPanel(g,st){
     ['home','away'].forEach(sd=>{ pg.appendChild(B(esc(g.teams[sd].name),a.possession===sd?'amber':'ghost',()=>{
       if(a.possession!==sd){ a.possession=sd; a.spot=L-a.spot; } render(); })); });
     wrap.appendChild(pg);
-    // ball position readout (field is tappable/draggable)
-    wrap.appendChild(h(`<div class="readout" id="posReadout" style="margin-top:10px">
-      <div class="lbl">Ball on — tap or drag the field</div>
+    // ball position — field (tap/drag) or numeric steppers
+    wrap.appendChild(modeToggle());
+    wrap.appendChild(h(`<div class="readout" id="posReadout" style="margin-top:2px">
+      <div class="lbl">${inputMode==='field'?'Ball on — tap or drag the field':'Ball on'}</div>
       <div class="rv" id="posReadoutVal">${esc(posLabel(g,a.spot))}</div></div>`));
+    if(inputMode==='numeric'){
+      const setSpot=(v)=>{ a.spot=Math.max(0,Math.min(L,Math.round(v))); render(); };
+      const mkRow=(pairs)=>{ const r=grid('c3'); r.style.marginBottom='8px';
+        pairs.forEach(([d,l])=>r.appendChild(B(l,'ghost sm',()=>setSpot(a.spot+d)))); return r; };
+      wrap.appendChild(mkRow([[-10,'−10'],[-5,'−5'],[-1,'−1']]));
+      wrap.appendChild(mkRow([[1,'+1'],[5,'+5'],[10,'+10']]));
+    }
     // down
     wrap.appendChild(h(`<div class="lbl" style="margin:4px 0 6px">Down</div>`));
     const dg=grid('c4');
@@ -590,6 +607,34 @@ function buildPanel(g,st){
     }
   }
 
+  // Shared renderer for a "set the spot" step — works in Field or Numbers mode.
+  const spotUI=(opts)=>{
+    const isInt=!!opts.isInt, allowTD=!!opts.allowTD, withDefender=!!opts.withDefender;
+    const L=g.settings.fieldLength;
+    const val=()=> isInt?ui.pending.intReturnEndSpot:ui.pending.endSpot;
+    if(inputMode==='numeric' && val()==null){
+      if(isInt) ui.pending.intReturnEndSpot=L-ui.pending.startSpot; else ui.pending.endSpot=ui.pending.startSpot;
+    }
+    wrap.appendChild(modeToggle());
+    wrap.appendChild(spotReadout(g));
+    const td=ui.pending.touchdown;
+    if(inputMode==='numeric'){
+      setPrompt(isInt?'Set the return, then save':(td?'Touchdown — optional missed flag':'Set yards gained, then save'),
+                isInt?'Adjust with the buttons':'+ downfield · − for a loss');
+      wrap.appendChild(yardChips(g,isInt));
+    } else {
+      const empty=val()==null;
+      setPrompt(empty?(isInt?'Drag or tap where the return ended':'Drag or tap the field to set the spot')
+                     :(isInt?'Return recorded':(td?'Touchdown — optional missed flag':'Optional: who pulled the flag?')),
+                empty?'The yard line shows beside the field':(isInt?'Shown from the intercepting side':'Or just save'));
+    }
+    if(val()!=null){
+      if(isInt){ const catchAt=L-ui.pending.startSpot; ui.pending.intReturnYds=Math.max(0,ui.pending.intReturnEndSpot-catchAt); }
+      if(withDefender) wrap.appendChild(defenderRow(g,defSide));
+      wrap.appendChild(saveRow(g,allowTD));
+    }
+  };
+
   switch(ui.step){
     case 'idle':{
       setPrompt(g.teams[posSide].name+' ball','Pick the play type');
@@ -627,17 +672,7 @@ function buildPanel(g,st){
       wrap.appendChild(playerPicker(off,ui.pending.receiver,pid=>{ui.pending.receiver=pid;ui.step='pass_spot';render();}));
       break;
     }
-    case 'pass_spot':{
-      wrap.appendChild(spotReadout(g));
-      const td=ui.pending.touchdown;
-      setPrompt(ui.pending.endSpot==null?'Drag or tap the field to set the spot':(td?'Touchdown — optional missed flag':'Optional: who pulled the flag?'),
-                ui.pending.endSpot==null?'The yard line shows beside the field':'Or just save');
-      if(ui.pending.endSpot!=null){
-        wrap.appendChild(defenderRow(g,defSide));
-        wrap.appendChild(saveRow(g,true));
-      }
-      break;
-    }
+    case 'pass_spot':{ spotUI({allowTD:true,withDefender:true}); break; }
     case 'pass_inc':{
       setPrompt('Incomplete — why?','Helps track drops & pass breakups');
       const gr=grid('c3');
@@ -657,43 +692,19 @@ function buildPanel(g,st){
       wrap.appendChild(playerPicker(def,ui.pending.interceptedBy,pid=>{ui.pending.interceptedBy=pid;ui.step='int_spot';render();}));
       break;
     }
-    case 'int_spot':{
-      wrap.appendChild(spotReadout(g));
-      setPrompt(ui.pending.intReturnEndSpot==null?'Drag or tap where the return ended':'Return recorded','Shown from the intercepting side');
-      if(ui.pending.intReturnEndSpot!=null){
-        const catchAt=g.settings.fieldLength-ui.pending.startSpot;
-        ui.pending.intReturnYds=Math.max(0,ui.pending.intReturnEndSpot-catchAt);
-        wrap.appendChild(saveRow(g,false));
-      }
-      break;
-    }
+    case 'int_spot':{ spotUI({isInt:true}); break; }
     case 'run_rusher':{
       setPrompt('Ball carrier?','Then tap the field where flags were pulled');
       wrap.appendChild(playerPicker(off,ui.pending.rusher,pid=>{ui.pending.rusher=pid;ui.step='run_spot';render();}));
       break;
     }
-    case 'run_spot':{
-      wrap.appendChild(spotReadout(g));
-      const td=ui.pending.touchdown;
-      setPrompt(ui.pending.endSpot==null?'Drag or tap the field to set the spot':(td?'Touchdown — optional missed flag':'Optional: who pulled the flag?'),
-                ui.pending.endSpot==null?'The yard line shows beside the field':'Or just save');
-      if(ui.pending.endSpot!=null){
-        wrap.appendChild(defenderRow(g,defSide));
-        wrap.appendChild(saveRow(g,true));
-      }
-      break;
-    }
+    case 'run_spot':{ spotUI({allowTD:true,withDefender:true}); break; }
     case 'sack_def':{
       setPrompt('Sack by?','Then tap the field for the loss spot');
       wrap.appendChild(playerPicker(def,ui.pending.sackBy,pid=>{ui.pending.sackBy=pid;ui.step='sack_spot';render();}));
       break;
     }
-    case 'sack_spot':{
-      wrap.appendChild(spotReadout(g));
-      setPrompt(ui.pending.endSpot==null?'Drag or tap where the QB was flagged':'Ready to save','Behind the line = loss');
-      if(ui.pending.endSpot!=null) wrap.appendChild(saveRow(g,false));
-      break;
-    }
+    case 'sack_spot':{ spotUI({}); break; }
     case 'penalty':{
       setPrompt('Penalty');
       const gr=grid('c2');
@@ -759,6 +770,26 @@ function defenderRow(g,defSide){
 function posLabel(g,yard){ const L=g.settings.fieldLength, mid=g.settings.midfield;
   if(yard<=0) return 'Own goal'; if(yard>=L) return 'Goal line';
   if(yard===mid) return 'Midfield'; if(yard<mid) return 'Own '+yard; return 'Opp '+(L-yard); }
+function modeToggle(){
+  const wrap=h(`<div class="modeToggle"></div>`);
+  const mk=(id,label)=>{ const b=h(`<button class="mt ${inputMode===id?'on':''}">${label}</button>`); b.onclick=()=>setInputMode(id); return b; };
+  wrap.appendChild(mk('field','🏈 Field')); wrap.appendChild(mk('numeric','123 Numbers'));
+  return wrap;
+}
+function yardChips(g,isInt){
+  const L=g.settings.fieldLength;
+  const wrap=h(`<div style="margin-top:8px"></div>`);
+  const getV=()=> isInt?ui.pending.intReturnEndSpot:ui.pending.endSpot;
+  const setV=(v)=>{ v=Math.max(0,Math.min(L,Math.round(v)));
+    if(isInt) ui.pending.intReturnEndSpot=v; else { ui.pending.endSpot=v; ui.pending.touchdown=v>=L; } render(); };
+  const mkRow=(pairs)=>{ const r=h(`<div class="btnGrid c3" style="margin-bottom:8px"></div>`);
+    pairs.forEach(([d,l])=>{ const b=h(`<button class="btn sm ghost">${l}</button>`); b.onclick=()=>setV(getV()+d); r.appendChild(b); }); return r; };
+  wrap.appendChild(mkRow([[-10,'−10'],[-5,'−5'],[-1,'−1']]));
+  wrap.appendChild(mkRow([[1,'+1'],[5,'+5'],[10,'+10']]));
+  if(!isInt){ const td=h(`<button class="btn sm amber" style="width:100%">Touchdown</button>`);
+    td.onclick=()=>{ ui.pending.endSpot=L; ui.pending.touchdown=true; render(); }; wrap.appendChild(td); }
+  return wrap;
+}
 function spotReadout(g){
   const wrap=h(`<div class="readout" id="posReadout"></div>`);
   const isInt = ui.step==='int_spot';
@@ -891,8 +922,8 @@ function renderSetup(){
   const tbar=h(`<div class="flexbtns" style="margin-top:8px"></div>`);
   const addBtn=h(`<button class="btn sm green">+ Add team</button>`);
   addBtn.onclick=()=>editTeam(null);
-  const seedBtn=h(`<button class="btn sm ghost">Load 7 test nations</button>`);
-  seedBtn.onclick=()=>{ loadTestTeams(); toast('Test nations loaded'); render(); };
+  const seedBtn=h(`<button class="btn sm ghost">Load tournament teams</button>`);
+  seedBtn.onclick=()=>{ loadTestTeams(); toast('Nations Cup teams loaded'); render(); };
   tbar.appendChild(addBtn); tbar.appendChild(seedBtn); tc.appendChild(tbar);
   root.appendChild(tc);
 

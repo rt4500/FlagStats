@@ -60,7 +60,9 @@ newest version, and offline it falls back to the last cached copy.
 ## Using it
 
 - **Teams & Games** — add teams (type players in or paste a roster), then create a
-  game. A **Load 7 test nations** button seeds sample rosters for testing.
+  game. A **Load tournament teams** button seeds the seven Nations Cup Prague teams
+  (Ireland, Finland, Sweden, Ukraine, Poland, Czechia, Switzerland) with placeholder
+  rosters for testing — swap in real players via Edit.
 - **Live** — tap PASS/RUN, pick the player, then **drag or tap the field** to set
   where the play ended (yards are computed automatically). Handles completions,
   incompletions, interceptions, sacks, penalties, touchdowns, and PAT/2-pt
