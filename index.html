@@ -72,10 +72,14 @@
 
   /* Prompt + buttons */
   .prompt{font-size:13px;font-weight:700;color:var(--ink);min-height:18px}
+  .readout{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:10px;text-align:center}
+  .readout .rv{font-family:var(--mono);font-weight:800;font-size:24px;line-height:1.1;margin-top:2px}
+  .readout .rg{font-family:var(--mono);font-size:13px;color:var(--amber);font-weight:700;margin-top:2px}
   .promptSub{font-size:11px;color:var(--muted);margin-top:2px}
   .btnGrid{display:grid;gap:8px}
   .btnGrid.c2{grid-template-columns:1fr 1fr}
   .btnGrid.c3{grid-template-columns:1fr 1fr 1fr}
+  .btnGrid.c4{grid-template-columns:1fr 1fr 1fr 1fr}
   .btn{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:16px 10px;
     font-weight:800;font-size:15px;letter-spacing:.02em;transition:transform .04s,background .1s}
   .btn:active{transform:scale(.97)}
@@ -209,8 +213,18 @@ function deriveState(plays,s){
   for(const p of plays){
     if(p.type==='pat'){ if(p.pat&&p.pat.good) add(patTeam,p.pat.type==='2'?2:1); awaitingPAT=false; newPoss(); continue; }
     if(p.type==='safety'){ add(possession==='home'?'away':'home',2); newPoss(); continue; }
+    if(p.type==='adjust'){
+      if(p.setPossession) possession=p.setPossession;
+      if(typeof p.setSpot==='number') spot=Math.max(0,Math.min(s.fieldLength,p.setSpot));
+      if(typeof p.setDown==='number') down=Math.max(1,Math.min(s.downsPerSeries,p.setDown));
+      seriesCrossedMid=(typeof p.setCrossedMid==='boolean')?p.setCrossedMid:(spot>=s.midfield);
+      if(p.addHome) home+=p.addHome; if(p.addAway) away+=p.addAway;
+      awaitingPAT=false; patTeam=null; continue;
+    }
     if(p.type==='penalty'){ const y=p.penalty.yards||0;
-      if(p.penalty.on==='def') spot=Math.min(s.fieldLength,spot+y); else spot=Math.max(0,spot-y);
+      if(p.penalty.on==='def'){ const half=(s.fieldLength-spot)/2; spot=spot+Math.min(y,half); }
+      else { const half=spot/2; spot=spot-Math.min(y,half); }
+      spot=Math.max(0,Math.min(s.fieldLength,Math.round(spot)));
       if(p.penalty.autoFirst) down=1; continue; }
     const start=(typeof p.startSpot==='number')?p.startSpot:spot;
     let end=(typeof p.endSpot==='number')?p.endSpot:start;
@@ -230,7 +244,7 @@ function deriveState(plays,s){
    STATS (box score) computed from plays
    ============================================================ */
 function blankLine(){return{att:0,comp:0,passYds:0,passTD:0,int:0,tgt:0,rec:0,recYds:0,recTD:0,drops:0,
-  rushAtt:0,rushYds:0,rushTD:0,flags:0,tfl:0,sacks:0,pbu:0,defint:0,intRetYds:0,
+  rushAtt:0,rushYds:0,rushTD:0,flags:0,tfl:0,sacks:0,pbu:0,defint:0,intRetYds:0,missedFlags:0,
   convThrow:0,convMade:0,convPts:0};}
 function computeStats(game){
   const S=game.settings;
@@ -268,9 +282,12 @@ function computeStats(game){
         else if(p.pat.via==='run'){ const r=ensure(off,p.rusher); if(r){ r.convMade++; r.convPts+=pts; } }
       }
     }
-    // flag pull credited on run/complete pass
-    if((p.type==='run'||(p.type==='pass'&&p.complete&&!p.touchdown))&&p.flagPullBy){
+    // flag pull credited on a stop short of the end zone; a TD instead records a missed flag
+    if((p.type==='run'||(p.type==='pass'&&p.complete))&&!p.touchdown&&p.flagPullBy){
       const d=ensure(def,p.flagPullBy); if(d){ d.flags++; if(gain<0)d.tfl++; }
+    }
+    if((p.type==='run'||(p.type==='pass'&&p.complete))&&p.touchdown&&p.missedFlagBy){
+      const d=ensure(def,p.missedFlagBy); if(d){ d.missedFlags++; }
     }
     sim.push(p);
   }
@@ -303,7 +320,7 @@ function newPending(game){
     endSpot:null, type:null, passer:null, receiver:null, rusher:null,
     complete:null, incompleteReason:null, touchdown:false,
     interception:false, interceptedBy:null, intReturnEndSpot:null, intReturnYds:0,
-    flagPullBy:null, defendedBy:null, sackBy:null, penalty:null, pat:null };
+    flagPullBy:null, missedFlagBy:null, defendedBy:null, sackBy:null, penalty:null, pat:null };
 }
 function commit(){ const g=activeGame(); if(!g||!ui.pending) return;
   g.plays.push(ui.pending); ui.pending=null; ui.step='idle'; persist(); render(); toast('Play saved'); }
@@ -311,6 +328,21 @@ function undo(){ const g=activeGame(); if(!g) return;
   if(ui.pending){ ui.pending=null; ui.step='idle'; render(); return; }
   if(g.plays.length){ g.plays.pop(); persist(); toast('Undid last play'); }
   render(); }
+
+// Manual correction of the game situation (for missed plays / possession changes).
+function enterAdjust(g){
+  if(ui.pending){ ui.pending=null; }
+  const st=deriveState(g.plays,g.settings);
+  ui.adjust={ possession:st.possession, spot:st.spot, down:st.down, home:st.home, away:st.away, base:st };
+  ui.step='adjust'; render();
+}
+function applyAdjust(){ const g=activeGame(); if(!g||!ui.adjust) return; const a=ui.adjust, S=g.settings;
+  g.plays.push({ type:'adjust', ts:Date.now(),
+    setPossession:a.possession, setSpot:a.spot, setDown:a.down,
+    setCrossedMid:a.spot>=S.midfield,
+    addHome:a.home-a.base.home, addAway:a.away-a.base.away });
+  ui.adjust=null; ui.step='idle'; persist(); render(); toast('Situation updated'); }
+function cancelAdjust(){ ui.adjust=null; ui.step='idle'; render(); }
 
 /* ============================================================
    RENDER: LIVE GAME
@@ -364,8 +396,9 @@ function renderGame(){
   // bottom bar
   const bar=h(`<div class="barRow"></div>`);
   const bUndo=h(`<button class="btn sm ghost">↶ Undo</button>`); bUndo.onclick=undo;
+  const bFix=h(`<button class="btn sm ghost">⚙ Fix</button>`); bFix.onclick=()=>enterAdjust(g);
   const bBox=h(`<button class="btn sm ghost">Box score ▾</button>`); bBox.onclick=()=>{g._showBox=!g._showBox;render();};
-  bar.appendChild(bUndo); bar.appendChild(bBox);
+  bar.appendChild(bUndo); bar.appendChild(bFix); bar.appendChild(bBox);
   root.appendChild(bar);
 
   if(g._showBox) root.appendChild(buildBoxScore(g));
@@ -400,9 +433,11 @@ function buildField(g,st,posSide){
     const nm=h(`<div class="ynum">${y<=S.midfield?y:(L-y)}</div>`);
     nm.style.top=pct+'%'; f.appendChild(nm);
   }
-  // committed ball
+  // committed ball (or the working spot while correcting the situation)
+  const isAdjust=()=> ui.step==='adjust' && ui.adjust;
   const cur=deriveState(g.plays,S);
-  const ball=h(`<div class="ball"></div>`); ball.style.top=yToPct(cur.spot)+'%'; f.appendChild(ball);
+  const ballSpot = isAdjust()? ui.adjust.spot : cur.spot;
+  const ball=h(`<div class="ball"></div>`); ball.style.top=yToPct(ballSpot)+'%'; f.appendChild(ball);
   // persistent pending marker + gain tag (shown during drag / after set)
   const pmark=h(`<div class="pending" style="display:none"></div>`); f.appendChild(pmark);
   const ptag=h(`<div class="gainTag" style="display:none"></div>`); f.appendChild(ptag);
@@ -415,6 +450,15 @@ function buildField(g,st,posSide){
     if(isInt()){ const catchAt=L-ui.pending.startSpot; const ret=Math.max(0,yard-catchAt); txt='ret '+ret+' yd'; }
     else { const gain=yard-ui.pending.startSpot; txt=(gain>=0?'+':'')+gain+' yd'+(yard>=L?' · TD':''); }
     ptag.style.display='block'; ptag.textContent=txt; ptag.style.top='calc('+pct+'% - 16px)';
+    const rv=document.getElementById('posReadoutVal'), rg=document.getElementById('posReadoutGain');
+    if(rv&&rg){
+      if(isInt()){ const catchAt=L-ui.pending.startSpot; rv.textContent=posLabel(g,yard); rg.textContent='return '+Math.max(0,yard-catchAt)+' yd'; }
+      else { const gain=yard-ui.pending.startSpot; rv.textContent=yard>=L?'Touchdown':posLabel(g,yard); rg.textContent=(gain>=0?'+':'')+gain+' yd'; }
+    }
+  }
+  function showAdjust(yard){
+    ball.style.top=yToPct(yard)+'%';
+    const rv=document.getElementById('posReadoutVal'); if(rv) rv.textContent=posLabel(g,yard);
   }
   // restore marker if a spot is already chosen
   if(ui.pending){
@@ -425,9 +469,12 @@ function buildField(g,st,posSide){
     const pctY=((clientY-rect.top)/rect.height)*100;
     let yard=((bot-pctY)/span)*L; return Math.max(0,Math.min(L,Math.round(yard))); };
   let dragging=false;
-  const begin=(cy,e)=>{ if(!isSpotStep())return; dragging=true; if(e&&e.pointerId!=null){try{f.setPointerCapture(e.pointerId);}catch(_){}} showAt(yardFrom(cy)); };
-  const move =(cy)=>{ if(!dragging)return; showAt(yardFrom(cy)); };
+  const active=()=> isSpotStep()||isAdjust();
+  const paint=(yard)=>{ if(isAdjust()){ ui.adjust.spot=yard; showAdjust(yard); } else showAt(yard); };
+  const begin=(cy,e)=>{ if(!active())return; dragging=true; if(e&&e.pointerId!=null){try{f.setPointerCapture(e.pointerId);}catch(_){}} paint(yardFrom(cy)); };
+  const move =(cy)=>{ if(!dragging)return; paint(yardFrom(cy)); };
   const end  =(cy)=>{ if(!dragging)return; dragging=false; const y=yardFrom(cy);
+    if(isAdjust()){ ui.adjust.spot=y; render(); return; }
     if(isInt()) ui.pending.intReturnEndSpot=y;
     else { ui.pending.endSpot=y; ui.pending.touchdown = y>=L; }
     render(); };
@@ -437,8 +484,9 @@ function buildField(g,st,posSide){
   f.addEventListener('pointercancel',()=>{ dragging=false; });
   // plain click fallback (older browsers without pointer events)
   if(!window.PointerEvent){
-    f.onclick=(e)=>{ if(!isSpotStep())return; const y=yardFrom(e.clientY);
-      if(isInt()) ui.pending.intReturnEndSpot=y; else { ui.pending.endSpot=y; ui.pending.touchdown=y>=L; } render(); };
+    f.onclick=(e)=>{ if(!active())return; const y=yardFrom(e.clientY);
+      if(isAdjust()){ ui.adjust.spot=y; }
+      else if(isInt()) ui.pending.intReturnEndSpot=y; else { ui.pending.endSpot=y; ui.pending.touchdown=y>=L; } render(); };
   }
   return f;
 }
@@ -453,6 +501,43 @@ function buildPanel(g,st){
 
   const grid=(cls)=>{const el=h(`<div class="btnGrid ${cls||''}"></div>`);return el;};
   const B=(txt,cls,fn)=>{const b=h(`<button class="btn ${cls||''}">${txt}</button>`);b.onclick=fn;return b;};
+
+  // ---- Fix the situation (manual correction after missed plays) ----
+  if(ui.step==='adjust' && ui.adjust){
+    const a=ui.adjust, L=S.fieldLength;
+    setPrompt('Fix the situation','Correct possession, ball, down or score after a missed play');
+    // possession
+    wrap.appendChild(h(`<div class="lbl" style="margin:10px 0 6px">Who has the ball?</div>`));
+    const pg=grid('c2');
+    ['home','away'].forEach(sd=>{ pg.appendChild(B(esc(g.teams[sd].name),a.possession===sd?'amber':'ghost',()=>{
+      if(a.possession!==sd){ a.possession=sd; a.spot=L-a.spot; } render(); })); });
+    wrap.appendChild(pg);
+    // ball position readout (field is tappable/draggable)
+    wrap.appendChild(h(`<div class="readout" id="posReadout" style="margin-top:10px">
+      <div class="lbl">Ball on — tap or drag the field</div>
+      <div class="rv" id="posReadoutVal">${esc(posLabel(g,a.spot))}</div></div>`));
+    // down
+    wrap.appendChild(h(`<div class="lbl" style="margin:4px 0 6px">Down</div>`));
+    const dg=grid('c4');
+    [1,2,3,4].forEach(d=>dg.appendChild(B(String(d),a.down===d?'amber':'ghost',()=>{a.down=d;render();})));
+    wrap.appendChild(dg);
+    // score
+    wrap.appendChild(h(`<div class="lbl" style="margin:10px 0 6px">Score</div>`));
+    ['home','away'].forEach(sd=>{
+      const row=h(`<div class="rowline" style="align-items:center"></div>`);
+      row.appendChild(h(`<div style="flex:1;font-weight:700">${esc(g.teams[sd].name)}</div>`));
+      const minus=h(`<button class="btn sm ghost" style="width:44px">−</button>`); minus.onclick=()=>{a[sd]=Math.max(0,a[sd]-1);render();};
+      const val=h(`<div class="num" style="width:44px;text-align:center;font-size:20px;font-weight:800">${a[sd]}</div>`);
+      const plus=h(`<button class="btn sm ghost" style="width:44px">+</button>`); plus.onclick=()=>{a[sd]=a[sd]+1;render();};
+      row.appendChild(minus);row.appendChild(val);row.appendChild(plus);
+      wrap.appendChild(row);
+    });
+    const bar=h(`<div class="barRow" style="margin-top:12px"></div>`);
+    bar.appendChild(B('Apply','green sm',applyAdjust));
+    bar.appendChild(B('Cancel','ghost sm',cancelAdjust));
+    wrap.appendChild(bar);
+    return wrap;
+  }
 
   // ---- Point-after / conversion flow (attributable) ----
   const inPAT = st.awaitingPAT || (ui.pending && ui.pending.type==='pat');
@@ -543,8 +628,10 @@ function buildPanel(g,st){
       break;
     }
     case 'pass_spot':{
-      setPrompt(ui.pending.endSpot==null?'Tap the field where flags were pulled':'Optional: who pulled the flag?',
-                ui.pending.endSpot==null?'Sets the yardage automatically':'Or just save the play');
+      wrap.appendChild(spotReadout(g));
+      const td=ui.pending.touchdown;
+      setPrompt(ui.pending.endSpot==null?'Drag or tap the field to set the spot':(td?'Touchdown — optional missed flag':'Optional: who pulled the flag?'),
+                ui.pending.endSpot==null?'The yard line shows beside the field':'Or just save');
       if(ui.pending.endSpot!=null){
         wrap.appendChild(defenderRow(g,defSide));
         wrap.appendChild(saveRow(g,true));
@@ -571,9 +658,9 @@ function buildPanel(g,st){
       break;
     }
     case 'int_spot':{
-      setPrompt(ui.pending.intReturnEndSpot==null?'Tap where the return ended':'Return recorded','Field is now shown from the intercepting side');
+      wrap.appendChild(spotReadout(g));
+      setPrompt(ui.pending.intReturnEndSpot==null?'Drag or tap where the return ended':'Return recorded','Shown from the intercepting side');
       if(ui.pending.intReturnEndSpot!=null){
-        // compute return yards from midfield-flip: intercept at (L - startSpot) in their frame
         const catchAt=g.settings.fieldLength-ui.pending.startSpot;
         ui.pending.intReturnYds=Math.max(0,ui.pending.intReturnEndSpot-catchAt);
         wrap.appendChild(saveRow(g,false));
@@ -586,8 +673,10 @@ function buildPanel(g,st){
       break;
     }
     case 'run_spot':{
-      setPrompt(ui.pending.endSpot==null?'Tap the field where flags were pulled':'Optional: who pulled the flag?',
-                ui.pending.endSpot==null?'Sets the yardage automatically':'Or just save');
+      wrap.appendChild(spotReadout(g));
+      const td=ui.pending.touchdown;
+      setPrompt(ui.pending.endSpot==null?'Drag or tap the field to set the spot':(td?'Touchdown — optional missed flag':'Optional: who pulled the flag?'),
+                ui.pending.endSpot==null?'The yard line shows beside the field':'Or just save');
       if(ui.pending.endSpot!=null){
         wrap.appendChild(defenderRow(g,defSide));
         wrap.appendChild(saveRow(g,true));
@@ -600,7 +689,8 @@ function buildPanel(g,st){
       break;
     }
     case 'sack_spot':{
-      setPrompt(ui.pending.endSpot==null?'Tap where the QB was flagged':'Ready','Behind the line = loss');
+      wrap.appendChild(spotReadout(g));
+      setPrompt(ui.pending.endSpot==null?'Drag or tap where the QB was flagged':'Ready to save','Behind the line = loss');
       if(ui.pending.endSpot!=null) wrap.appendChild(saveRow(g,false));
       break;
     }
@@ -614,12 +704,17 @@ function buildPanel(g,st){
       break;
     }
     case 'penalty_yd':{
-      setPrompt('Penalty yards ('+(ui.pending.penalty.on==='def'?'defense':'offense')+')');
-      const gr=grid('c3');
-      [5,10,15].forEach(y=>gr.appendChild(B(y+' yd','ghost',()=>{ui.pending.penalty.yards=y;
-        if(ui.pending.penalty.on==='def'){ // ask auto first?
-          ui.pending.penalty.autoFirst=false; }
-        commit();})));
+      const isDef=ui.pending.penalty.on==='def';
+      setPrompt('Penalty yards ('+(isDef?'defense':'offense')+')',
+                'Half-the-distance is applied automatically near a goal line');
+      // automatic first down toggle
+      const af=ui.pending.penalty.autoFirst;
+      const toggle=h(`<button class="btn sm ${af?'amber':'ghost'}" style="margin-bottom:8px;width:100%">${af?'✓ ':''}Automatic first down</button>`);
+      toggle.onclick=()=>{ ui.pending.penalty.autoFirst=!ui.pending.penalty.autoFirst; render(); };
+      wrap.appendChild(toggle);
+      const gr=grid('c2');
+      [5,10,15].forEach(y=>gr.appendChild(B(y+' yards','ghost',()=>{ui.pending.penalty.yards=y;commit();})));
+      gr.appendChild(B('Half distance','ghost',()=>{ui.pending.penalty.yards=g.settings.fieldLength;commit();}));
       wrap.appendChild(gr);
       break;
     }
@@ -654,19 +749,39 @@ function playerPicker(list,selId,onPick,noAdd){
   return el;
 }
 function defenderRow(g,defSide){
+  const td = ui.pending && ui.pending.touchdown;
   const wrap=h(`<div style="margin-top:8px"></div>`);
-  wrap.appendChild(h(`<div class="lbl" style="margin-bottom:6px">Flag pull by (optional)</div>`));
-  wrap.appendChild(playerPicker(rosterOf(g,defSide),ui.pending.flagPullBy,pid=>{ui.pending.flagPullBy=pid;render();}));
+  wrap.appendChild(h(`<div class="lbl" style="margin-bottom:6px">${td?'Missed flag by (optional)':'Flag pull by (optional)'}</div>`));
+  const field = td ? 'missedFlagBy' : 'flagPullBy';
+  wrap.appendChild(playerPicker(rosterOf(g,defSide),ui.pending[field],pid=>{ui.pending[field]=pid;render();}));
+  return wrap;
+}
+function posLabel(g,yard){ const L=g.settings.fieldLength, mid=g.settings.midfield;
+  if(yard<=0) return 'Own goal'; if(yard>=L) return 'Goal line';
+  if(yard===mid) return 'Midfield'; if(yard<mid) return 'Own '+yard; return 'Opp '+(L-yard); }
+function spotReadout(g){
+  const wrap=h(`<div class="readout" id="posReadout"></div>`);
+  const isInt = ui.step==='int_spot';
+  const val = isInt ? ui.pending.intReturnEndSpot : ui.pending.endSpot;
+  let posTxt='—', gainTxt='drag the field';
+  if(val!=null){
+    if(isInt){ const catchAt=g.settings.fieldLength-ui.pending.startSpot; posTxt=posLabel(g,val); gainTxt='return '+Math.max(0,val-catchAt)+' yd'; }
+    else { const gn=val-ui.pending.startSpot; posTxt=val>=g.settings.fieldLength?'Touchdown':posLabel(g,val); gainTxt=(gn>=0?'+':'')+gn+' yd'; }
+  }
+  wrap.appendChild(h(`<div class="lbl">Ball on</div>`));
+  wrap.appendChild(h(`<div class="rv" id="posReadoutVal">${esc(posTxt)}</div>`));
+  wrap.appendChild(h(`<div class="rg" id="posReadoutGain">${esc(gainTxt)}</div>`));
   return wrap;
 }
 function saveRow(g,allowTD){
+  const isTD = ui.pending && ui.pending.touchdown;
   const row=h(`<div class="barRow" style="margin-top:10px"></div>`);
-  if(allowTD){
+  if(allowTD && !isTD){
     const td=h(`<button class="btn amber sm">Touchdown</button>`);
-    td.onclick=()=>{ ui.pending.touchdown=true; ui.pending.endSpot=g.settings.fieldLength; commit(); };
+    td.onclick=()=>{ ui.pending.touchdown=true; ui.pending.endSpot=g.settings.fieldLength; render(); };
     row.appendChild(td);
   }
-  const save=h(`<button class="btn green sm">Save play</button>`); save.onclick=commit;
+  const save=h(`<button class="btn green sm">${isTD?'Save touchdown':'Save play'}</button>`); save.onclick=commit;
   const cancel=h(`<button class="btn ghost sm">Cancel</button>`); cancel.onclick=()=>{ui.pending=null;ui.step='idle';render();};
   row.appendChild(save); row.appendChild(cancel);
   return row;
@@ -691,12 +806,12 @@ function buildBoxScore(g){
       t+=`</tbody></table>`; wrap.appendChild(h(t));
     }
     // Defense table
-    const def=rows.filter(x=>x.s.flags||x.s.sacks||x.s.pbu||x.s.defint);
+    const def=rows.filter(x=>x.s.flags||x.s.sacks||x.s.pbu||x.s.defint||x.s.missedFlags);
     if(def.length){
-      let t=`<table style="margin-top:8px"><thead><tr><th>Defense</th><th>Flags</th><th>TFL</th><th>Sack</th><th>PBU</th><th>INT</th></tr></thead><tbody>`;
+      let t=`<table style="margin-top:8px"><thead><tr><th>Defense</th><th>Flags</th><th>TFL</th><th>Sack</th><th>PBU</th><th>INT</th><th>Miss</th></tr></thead><tbody>`;
       def.forEach(({p,s})=>{ t+=`<tr><td>#${esc(p.num)} ${esc(p.name||'')}</td>
         <td class="num">${s.flags}</td><td class="num">${s.tfl}</td><td class="num">${s.sacks}</td>
-        <td class="num">${s.pbu}</td><td class="num">${s.defint}</td></tr>`; });
+        <td class="num">${s.pbu}</td><td class="num">${s.defint}</td><td class="num">${s.missedFlags}</td></tr>`; });
       t+=`</tbody></table>`; wrap.appendChild(h(t));
     }
     // Conversions (PAT / 2-pt)
@@ -900,7 +1015,7 @@ function renderTourney(){
   exp.appendChild(csvBtn); root.appendChild(exp);
 }
 function downloadTourneyCSV(all){
-  const cols=['team','num','name','att','comp','passYds','passTD','int','tgt','rec','recYds','recTD','drops','rushAtt','rushYds','rushTD','flags','tfl','sacks','pbu','defint','intRetYds','convThrow','convMade','convPts'];
+  const cols=['team','num','name','att','comp','passYds','passTD','int','tgt','rec','recYds','recTD','drops','rushAtt','rushYds','rushTD','flags','tfl','sacks','pbu','defint','intRetYds','missedFlags','convThrow','convMade','convPts'];
   let csv=cols.join(',')+'\n';
   all.forEach(a=>{ const row=cols.map(c=>{ if(c in a) return csvCell(a[c]); return a.line[c]??0; }); csv+=row.join(',')+'\n'; });
   downloadBlob(csv,'nations-cup-stats.csv','text/csv');
