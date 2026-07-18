@@ -1545,6 +1545,7 @@ function renderTourney(){
     const lc0=h(`<div class="card"><h3>Live now</h3></div>`);
     const entries=Object.entries(liveGames).filter(([k,rec])=>rec.game&&rec.game.plays&&rec.game.plays.length>0);
     if(!entries.length){ lc0.appendChild(h(`<div class="help">Watching for live games… nothing received yet. Auto-refreshes every 20 s (updates can take up to a minute to propagate).</div>`)); }
+    if(liveStatus){ lc0.appendChild(h(`<div class="help" style="margin-bottom:6px;${liveStatus.startsWith('error')?'color:var(--red);font-weight:700':''}">${esc(liveStatus)}</div>`)); }
     entries.sort((a,b)=>b[1].updated-a[1].updated).forEach(([dev,rec])=>{
       const g=rec.game; const st=deriveState(g.plays,g.settings);
       const ago=Math.max(0,Math.round((Date.now()-rec.updated)/1000));
@@ -1562,7 +1563,8 @@ function renderTourney(){
         box.style.padding='0 4px 8px'; lc0.appendChild(box);
       }
     });
-    const rf=h(`<button class="btn sm ghost" style="margin-top:4px">Refresh now</button>`); rf.onclick=()=>fetchLive();
+    const rf=h(`<button class="btn sm ghost" style="margin-top:4px">Refresh now</button>`);
+    rf.onclick=()=>{ toast('Checking…'); fetchLive(true); };
     lc0.appendChild(rf);
     root.appendChild(lc0);
   }
@@ -1724,28 +1726,37 @@ if(typeof window!=='undefined'&&window.addEventListener){
 }
 
 /* ---- LIVE VIEWER: poll other tablets' bins (read-only role) ---- */
-let liveGames={}, liveTimer=null, liveFetching=false, liveExpand={};
+let liveGames={}, liveTimer=null, liveFetching=false, liveExpand={}, liveStatus='';
 function viewBinIds(){ return (prefs.viewBins||'').split(',').map(s=>s.trim()).filter(Boolean); }
 function viewerConfigured(){ return autoMode() || (viewBinIds().length && (prefs.syncKey||'').trim()); }
-async function fetchLive(){
-  if(liveFetching) return; liveFetching=true;
+async function fetchLive(force){
+  if(liveFetching && !force) return;
+  liveFetching=true;
   try{
     if(autoMode()){
       const q=LIVE_CONFIG.token?('?t='+encodeURIComponent(LIVE_CONFIG.token)):'';
-      const r=await fetch(LIVE_CONFIG.url.replace(/\/$/,'')+'/g'+q);
-      if(r.ok){ const arr=await r.json();
-        if(Array.isArray(arr)) arr.forEach(rec=>{ if(rec&&rec.game) liveGames[rec.device||rec.game.id]=rec; }); }
+      const r=await fetch(LIVE_CONFIG.url.replace(/\/$/,'')+'/g'+q,{cache:'no-store'});
+      if(!r.ok){ liveStatus='error: server said '+r.status+(r.status===403?' (token mismatch)':''); }
+      else {
+        let arr=null;
+        try{ arr=await r.json(); }catch(e){ liveStatus='error: unexpected response (not JSON)'; }
+        if(Array.isArray(arr)){
+          arr.forEach(rec=>{ if(rec&&rec.game) liveGames[rec.device||rec.game.id]=rec; });
+          liveStatus='last check '+new Date().toLocaleTimeString()+' · '+arr.length+' broadcast(s) on server';
+        } else if(arr!==null){ liveStatus='error: unexpected response shape'; }
+      }
     } else {
       for(const id of viewBinIds()){
         try{
-          const r=await fetch('https://api.jsonbin.io/v3/b/'+id+'/latest',{headers:{'X-Master-Key':(prefs.syncKey||'').trim()}});
+          const r=await fetch('https://api.jsonbin.io/v3/b/'+id+'/latest',{headers:{'X-Master-Key':(prefs.syncKey||'').trim()},cache:'no-store'});
           if(!r.ok) continue;
           const j=await r.json();
           if(j&&j.record&&j.record.game) liveGames[id]=j.record;
         }catch(e){}
       }
+      liveStatus='last check '+new Date().toLocaleTimeString();
     }
-  }catch(e){}
+  }catch(e){ liveStatus='error: '+(e&&e.message?e.message:'network failure'); }
   liveFetching=false;
   if(typeof curTab!=='undefined' && curTab==='tourney') render();
 }

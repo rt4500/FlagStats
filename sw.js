@@ -2,7 +2,7 @@
    Strategy: NETWORK-FIRST. When online you always get the freshest files
    (handy while iterating), and the latest good copy is cached so the app
    still opens with no connection (arena wifi). Bump CACHE to force a refresh. */
-const CACHE = 'flag-stats-v13';
+const CACHE = 'flag-stats-v14';
 const ASSETS = [
   './',
   './index.html',
@@ -26,6 +26,9 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
+  // Never intercept cross-origin requests (e.g. live-sync API calls) —
+  // the offline fallback must not answer API calls with cached HTML.
+  if (new URL(e.request.url).origin !== self.location.origin) return;
   e.respondWith(
     fetch(e.request)
       .then((res) => {
