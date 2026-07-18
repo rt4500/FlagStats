@@ -426,9 +426,6 @@ function computeStats(game){
     if((p.type==='run'||(p.type==='pass'&&p.complete))&&!p.touchdown&&p.flagPullBy){
       const d=ensure(def,p.flagPullBy); if(d){ d.flags++; if(gain<0)d.tfl++; }
     }
-    if((p.type==='run'||(p.type==='pass'&&p.complete))&&p.touchdown&&p.missedFlagBy){
-      const d=ensure(def,p.missedFlagBy); if(d){ d.missedFlags++; }
-    }
     sim.push(p);
   }
   return stats;
@@ -474,7 +471,15 @@ function clockElapsed(g){ const c=ensureClock(g); return c.running ? c.elapsed+M
 function clockNow(g){ const c=ensureClock(g); return Math.max(0, c.halfLen-clockElapsed(g)); } // remaining
 function clockToggle(g){ const c=ensureClock(g);
   if(c.running){ c.elapsed=clockElapsed(g); c.running=false; }
-  else { if(clockNow(g)<=0){ return; } c.startedAt=Date.now(); c.running=true; }
+  else {
+    if(clockNow(g)<=0){
+      if(c.half===1){ showModal({title:'Start 2nd half?',body:'Resets the clock to a fresh half.',
+        buttons:[{label:'Start H2',cls:'green',onTap:()=>{clockSetHalf(g,2); const c2=ensureClock(g); c2.startedAt=Date.now(); c2.running=true; persist(); render();}},{label:'Cancel'}]}); }
+      else { toast('Half is over — tap H1/H2 to reset'); }
+      return;
+    }
+    c.startedAt=Date.now(); c.running=true;
+  }
   persist(); render(); }
 function clockSetHalf(g,hf){ const c=ensureClock(g);
   if(c.half===hf) return;
@@ -737,7 +742,11 @@ function buildPanel(g,st){
   const S=g.settings;
   const posSide=st.possession, defSide=posSide==='home'?'away':'home';
   const off=rosterOf(g,posSide), def=rosterOf(g,defSide);
-  const setPrompt=(t,sub)=>wrap.appendChild(h(`<div><div class="prompt">${esc(t)}</div>${sub?`<div class="promptSub">${esc(sub)}</div>`:''}</div>`));
+  const setPrompt=(t,sub)=>{
+    const row=h(`<div style="display:flex;align-items:flex-start;gap:8px"><div style="flex:1"><div class="prompt">${esc(t)}</div>${sub?`<div class="promptSub">${esc(sub)}</div>`:''}</div></div>`);
+    if(ui.pending){ const x=h(`<button class="x" title="Cancel play" style="font-size:22px;line-height:1;padding:0 4px">✕</button>`);
+      x.onclick=()=>{ui.pending=null;ui.step='idle';render();}; row.appendChild(x); }
+    wrap.appendChild(row); };
 
   const grid=(cls)=>{const el=h(`<div class="btnGrid ${cls||''}"></div>`);return el;};
   const B=(txt,cls,fn)=>{const b=h(`<button class="btn ${cls||''}">${txt}</button>`);b.onclick=fn;return b;};
@@ -860,18 +869,18 @@ function buildPanel(g,st){
     wrap.appendChild(spotReadout(g));
     const td=ui.pending.touchdown;
     if(inputMode==='numeric'){
-      setPrompt(isInt?'Set the return, then save':(td?'Touchdown — optional missed flag':'Set yards gained, then save'),
+      setPrompt(isInt?'Set the return, then save':(td?'Touchdown — save the play':'Set yards gained, then save'),
                 isInt?'Adjust with the buttons':'+ downfield · − for a loss');
       wrap.appendChild(yardChips(g,isInt));
     } else {
       const empty=val()==null;
       setPrompt(empty?(isInt?'Drag or tap where the return ended':'Drag or tap the field to set the spot')
-                     :(isInt?'Return recorded':(td?'Touchdown — optional missed flag':'Optional: who pulled the flag?')),
+                     :(isInt?'Return recorded':(td?'Touchdown — save the play':'Optional: who pulled the flag?')),
                 empty?'The yard line shows beside the field':(isInt?'Shown from the intercepting side':'Or just save'));
     }
     if(val()!=null){
       if(isInt){ const catchAt=L-ui.pending.startSpot; ui.pending.intReturnYds=Math.max(0,ui.pending.intReturnEndSpot-catchAt); }
-      if(withDefender) wrap.appendChild(defenderRow(g,defSide));
+      if(withDefender && !ui.pending.touchdown) wrap.appendChild(defenderRow(g,defSide));
       wrap.appendChild(saveRow(g,allowTD));
     }
   };
@@ -899,13 +908,16 @@ function buildPanel(g,st){
       break;
     }
     case 'pass_out':{
-      setPrompt('Passer: '+playerName(g,posSide,ui.pending.passer),'Tap to change · then the result');
-      wrap.appendChild(playerPicker(off,ui.pending.passer,pid=>{ui.pending.passer=pid;render();},true));
-      const gr=grid('c3'); gr.style.marginTop='10px';
-      gr.appendChild(B('Complete','green',()=>{ui.pending.complete=true;ui.step='pass_rec';render();}));
-      gr.appendChild(B('Incomplete','ghost',()=>{ui.pending.complete=false; if(prefs.spotter){commit();return;} ui.step='pass_inc';render();}));
-      gr.appendChild(B('Intercept','red',()=>{ui.pending.complete=false;ui.pending.interception=true;ui.step='int_def';render();}));
+      setPrompt('Pass result','Passer: '+playerName(g,posSide,ui.pending.passer));
+      const gr=grid('c3');
+      gr.appendChild(B('Complete','green big',()=>{ui.pending.complete=true;ui.step='pass_rec';render();}));
+      gr.appendChild(B('Incomplete','ghost big',()=>{ui.pending.complete=false; if(prefs.spotter){commit();return;} ui.step='pass_inc';render();}));
+      gr.appendChild(B('Intercept','red big',()=>{ui.pending.complete=false;ui.pending.interception=true;ui.step='int_def';render();}));
       wrap.appendChild(gr);
+      const ch=h(`<button class="btn sm ghost" style="margin-top:8px;width:100%">${ui._passerOpen?'▴ hide passers':'Change passer ▾'}</button>`);
+      ch.onclick=()=>{ui._passerOpen=!ui._passerOpen;render();};
+      wrap.appendChild(ch);
+      if(ui._passerOpen){ wrap.appendChild(playerPicker(off,ui.pending.passer,pid=>{ui.pending.passer=pid;ui._passerOpen=false;render();},true)); }
       break;
     }
     case 'pass_rec':{
@@ -915,12 +927,14 @@ function buildPanel(g,st){
     }
     case 'pass_spot':{ spotUI({allowTD:true,withDefender:true}); break; }
     case 'pass_inc':{
-      setPrompt('Incomplete — why?','Helps track drops & pass breakups');
+      setPrompt('Incomplete — why?','Optional: helps track drops & pass breakups');
       const gr=grid('c3');
       gr.appendChild(B('Drop','ghost',()=>{ui.pending.incompleteReason='drop';commit();}));
       gr.appendChild(B('Defended','ghost',()=>{ui.pending.incompleteReason='defended';ui.step='pbu_def';render();}));
       gr.appendChild(B('Overthrow','ghost',()=>{ui.pending.incompleteReason='overthrow';commit();}));
       wrap.appendChild(gr);
+      const sk=h(`<button class="btn sm ghost" style="margin-top:8px;width:100%">Just incomplete — save</button>`);
+      sk.onclick=commit; wrap.appendChild(sk);
       break;
     }
     case 'pbu_def':{
@@ -984,7 +998,7 @@ function defaultQB(g,side){ // last passer used, else first player
   for(let i=g.plays.length-1;i>=0;i--){ const p=g.plays[i]; if(p.type==='pass'&&p.offense===side&&p.passer) return p.passer; }
   const r=rosterOf(g,side); return r.length?r[0].id:null;
 }
-function startPending(g){ ui.pending=newPending(g); }
+function startPending(g){ ui.pending=newPending(g); ui._passerOpen=false; }
 function playerPicker(list,selId,onPick,noAdd){
   const el=h(`<div class="pGrid"></div>`);
   list.forEach(p=>{
@@ -1013,11 +1027,9 @@ function playerPicker(list,selId,onPick,noAdd){
   return el;
 }
 function defenderRow(g,defSide){
-  const td = ui.pending && ui.pending.touchdown;
   const wrap=h(`<div style="margin-top:8px"></div>`);
-  wrap.appendChild(h(`<div class="lbl" style="margin-bottom:6px">${td?'Missed flag by (optional)':'Flag pull by (optional)'}</div>`));
-  const field = td ? 'missedFlagBy' : 'flagPullBy';
-  wrap.appendChild(playerPicker(rosterOf(g,defSide),ui.pending[field],pid=>{ui.pending[field]=pid;render();}));
+  wrap.appendChild(h(`<div class="lbl" style="margin-bottom:6px">Flag pull by — tap to save</div>`));
+  wrap.appendChild(playerPicker(rosterOf(g,defSide),ui.pending.flagPullBy,pid=>{ui.pending.flagPullBy=pid;commit();}));
   return wrap;
 }
 const IOC_CODES={'Switzerland':'SUI','Ireland':'IRL','Sweden':'SWE','Ukraine':'UKR','Poland':'POL','Czechia':'CZE','Finland':'FIN','Germany':'GER','Austria':'AUT','France':'FRA','Italy':'ITA','Great Britain':'GBR'};
@@ -1096,10 +1108,10 @@ function describePlay(g,p,pre){
     const qb=pName(g,off,p.passer)||'QB';
     if(p.interception){ const p6=(p.intReturnEndSpot!=null&&p.intReturnEndSpot>=g.settings.fieldLength);
       desc=`${qb} INTERCEPTED by ${pName(g,def,p.interceptedBy)||'?'}${p.intReturnYds?` · ret ${p.intReturnYds}`:''}${p6?' · PICK-6 TOUCHDOWN':''}`; scoring=true; }
-    else if(p.complete){ desc=`${qb} → ${pName(g,off,p.receiver)||'?'} ${yd(gain)}${p.touchdown?' · TOUCHDOWN':''}${p.flagPullBy?` · flag ${pName(g,def,p.flagPullBy)}`:''}${p.missedFlagBy?` · missed ${pName(g,def,p.missedFlagBy)}`:''}`; scoring=p.touchdown; }
+    else if(p.complete){ desc=`${qb} → ${pName(g,off,p.receiver)||'?'} ${yd(gain)}${p.touchdown?' · TOUCHDOWN':''}${p.flagPullBy?` · flag ${pName(g,def,p.flagPullBy)}`:''}`; scoring=p.touchdown; }
     else { desc=`${qb} incomplete${p.receiver?` (→ ${pName(g,off,p.receiver)})`:''}${p.incompleteReason?` · ${p.incompleteReason}`:''}${p.defendedBy?` by ${pName(g,def,p.defendedBy)}`:''}`; }
   }
-  else if(p.type==='run'){ desc=`Run ${pName(g,off,p.rusher)||'?'} ${yd(gain)}${p.touchdown?' · TOUCHDOWN':''}${p.flagPullBy?` · flag ${pName(g,def,p.flagPullBy)}`:''}${p.missedFlagBy?` · missed ${pName(g,def,p.missedFlagBy)}`:''}`; scoring=p.touchdown; }
+  else if(p.type==='run'){ desc=`Run ${pName(g,off,p.rusher)||'?'} ${yd(gain)}${p.touchdown?' · TOUCHDOWN':''}${p.flagPullBy?` · flag ${pName(g,def,p.flagPullBy)}`:''}`; scoring=p.touchdown; }
   else if(p.type==='sack'){ desc=`SACK by ${pName(g,def,p.sackBy)||'?'} ${yd(gain)}`; }
   else if(p.type==='pat'){ const who=p.pat.via==='pass'?`${pName(g,off,p.passer)||''} → ${pName(g,off,p.receiver)||''}`:(p.pat.via==='run'?pName(g,off,p.rusher)||'':'');
     desc=`${p.pat.type}-pt ${p.pat.good?'GOOD':'no good'}${who?` · ${who}`:''}`; scoring=p.pat.good; }
@@ -1149,10 +1161,10 @@ function buildPlayEditor(g,p,idx,pre){
   };
   if(p.type==='pass'){ pick('Passer',off,'passer');
     if(p.interception){ pick('Intercepted by',def,'interceptedBy'); }
-    else if(p.complete){ pick('Receiver',off,'receiver'); pick(p.touchdown?'Missed flag':'Flag pull',def,p.touchdown?'missedFlagBy':'flagPullBy'); }
+    else if(p.complete){ pick('Receiver',off,'receiver'); if(!p.touchdown) pick('Flag pull',def,'flagPullBy'); }
     else { pick('Target',off,'receiver'); }
   }
-  if(p.type==='run'){ pick('Ball carrier',off,'rusher'); pick(p.touchdown?'Missed flag':'Flag pull',def,p.touchdown?'missedFlagBy':'flagPullBy'); }
+  if(p.type==='run'){ pick('Ball carrier',off,'rusher'); if(!p.touchdown) pick('Flag pull',def,'flagPullBy'); }
   if(p.type==='sack'){ pick('Sack by',def,'sackBy'); }
   if(!p.interception && typeof p.endSpot==='number'){
     box.appendChild(h(`<div class="lbl" style="margin:8px 0 4px">End spot: <span class="num">${esc(posLabel(g,p.endSpot,pre.possession))}</span> (${(p.endSpot-p.startSpot>=0?'+':'')}${p.endSpot-p.startSpot} yd)</div>`));
@@ -1293,12 +1305,12 @@ function buildBoxScore(g){
       wrap.appendChild(h(`<div class="help" style="margin-top:4px"><b>QB #${esc(p.num)} ${esc(p.name||'')}</b> — ${cp}% comp · ${ya} yds/att · ${s.passTD} TD : ${s.int} INT · RTG <b>${passerRating(s)}</b></div>`));
     });
     // Defense table
-    const def=rows.filter(x=>x.s.flags||x.s.sacks||x.s.pbu||x.s.defint||x.s.missedFlags);
+    const def=rows.filter(x=>x.s.flags||x.s.sacks||x.s.pbu||x.s.defint);
     if(def.length){
-      let t=`<table style="margin-top:8px"><thead><tr><th>Defense</th><th>Flags</th><th>TFL</th><th>Sack</th><th>PBU</th><th>INT</th><th>Miss</th></tr></thead><tbody>`;
+      let t=`<table style="margin-top:8px"><thead><tr><th>Defense</th><th>Flags</th><th>TFL</th><th>Sack</th><th>PBU</th><th>INT</th></tr></thead><tbody>`;
       def.forEach(({p,s})=>{ t+=`<tr><td>#${esc(p.num)} ${esc(p.name||'')}</td>
         <td class="num">${s.flags}</td><td class="num">${s.tfl}</td><td class="num">${s.sacks}</td>
-        <td class="num">${s.pbu}</td><td class="num">${s.defint}</td><td class="num">${s.missedFlags}</td></tr>`; });
+        <td class="num">${s.pbu}</td><td class="num">${s.defint}</td></tr>`; });
       t+=`</tbody></table>`; wrap.appendChild(h(t));
     }
     // Conversions (PAT / 2-pt)
@@ -1666,7 +1678,7 @@ function renderTourney(){
   exp.appendChild(csvBtn); root.appendChild(exp);
 }
 function downloadTourneyCSV(all){
-  const cols=['team','num','name','att','comp','passYds','passTD','int','tgt','rec','recYds','recTD','drops','rushAtt','rushYds','rushTD','flags','tfl','sacks','pbu','defint','intRetYds','intRetTD','missedFlags','convThrow','convMade','convPts'];
+  const cols=['team','num','name','att','comp','passYds','passTD','int','tgt','rec','recYds','recTD','drops','rushAtt','rushYds','rushTD','flags','tfl','sacks','pbu','defint','intRetYds','intRetTD','convThrow','convMade','convPts'];
   let csv=cols.join(',')+'\n';
   all.forEach(a=>{ const row=cols.map(c=>{ if(c in a) return csvCell(a[c]); return a.line[c]??0; }); csv+=row.join(',')+'\n'; });
   downloadBlob(csv,'nations-cup-stats.csv','text/csv');
