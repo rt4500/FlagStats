@@ -549,7 +549,7 @@ function renderGame(){
   root.innerHTML='';
   root.appendChild(h(`
    <div class="board">
-    ${syncConfigured()?`<div id="syncChip" style="text-align:right;font-size:10px;font-weight:800;letter-spacing:.05em;color:${(g._syncedPlays===g.plays.length)?'var(--green)':'var(--amber)'}">${(g._syncedPlays===g.plays.length)?'● LIVE':'● syncing…'}</div>`:''}
+    ${(syncConfigured()&&g.plays.length)?`<div id="syncChip" style="text-align:right;font-size:10px;font-weight:800;letter-spacing:.05em;color:${(g._syncedPlays===g.plays.length)?'var(--green)':'var(--amber)'}">${(g._syncedPlays===g.plays.length)?'● LIVE':'● syncing…'}</div>`:''}
     <div class="scoreRow">
       <div class="teamBox ${posSide==='home'?'pos':''}">
         <div class="teamName">${posSide==='home'?'<span class="posDot"></span>':''}${esc(hn)}</div>
@@ -1543,18 +1543,24 @@ function renderTourney(){
   // ---- LIVE NOW: games streaming in from the field tablets ----
   if(viewerConfigured()){
     const lc0=h(`<div class="card"><h3>Live now</h3></div>`);
-    const entries=Object.values(liveGames);
-    if(!entries.length){ lc0.appendChild(h(`<div class="help">Watching for live games… nothing received yet. Auto-refreshes every 20 s.</div>`)); }
-    entries.sort((a,b)=>b.updated-a.updated).forEach(rec=>{
+    const entries=Object.entries(liveGames).filter(([k,rec])=>rec.game&&rec.game.plays&&rec.game.plays.length>0);
+    if(!entries.length){ lc0.appendChild(h(`<div class="help">Watching for live games… nothing received yet. Auto-refreshes every 20 s (updates can take up to a minute to propagate).</div>`)); }
+    entries.sort((a,b)=>b[1].updated-a[1].updated).forEach(([dev,rec])=>{
       const g=rec.game; const st=deriveState(g.plays,g.settings);
       const ago=Math.max(0,Math.round((Date.now()-rec.updated)/1000));
       const posN=g.teams[st.possession].name;
       const situ=st.awaitingPAT?'PAT':`${st.down}${['st','nd','rd','th'][Math.min(st.down,4)-1]} · ${posLabel(g,st.spot)}`;
-      const clockTag=(prefs.clock&&g.clock)?` · H${g.clock.half}`:'';
-      lc0.appendChild(h(`<div class="gameItem"><div>
+      const clockTag=(g.clock&&g.clock.half)?` · H${g.clock.half}`:'';
+      const item=h(`<div class="gameItem" style="cursor:pointer"><div style="flex:1">
         <div style="font-weight:800">${esc(g.teams.home.name)} <span class="num">${st.home}–${st.away}</span> ${esc(g.teams.away.name)}${g.finished?'<span class="finalBadge">FINAL</span>':''}</div>
-        <div class="meta">${esc(g.name||'')}${clockTag} · ${g.finished?'final':esc(posN)+' ball · '+esc(situ)} · ${g.plays.length} plays · ${ago<60?ago+'s':Math.round(ago/60)+'min'} ago</div>
-      </div></div>`));
+        <div class="meta">${esc(g.name||'')}${clockTag} · ${g.finished?'final':esc(posN)+' ball · '+esc(situ)} · ${g.plays.length} plays · ${ago<60?ago+'s':Math.round(ago/60)+'min'} ago · ${liveExpand[dev]?'tap to hide stats ▴':'tap for stats ▾'}</div>
+      </div></div>`);
+      item.onclick=()=>{ liveExpand[dev]=!liveExpand[dev]; render(); };
+      lc0.appendChild(item);
+      if(liveExpand[dev]){
+        const box=buildBoxScore(g);
+        box.style.padding='0 4px 8px'; lc0.appendChild(box);
+      }
     });
     const rf=h(`<button class="btn sm ghost" style="margin-top:4px">Refresh now</button>`); rf.onclick=()=>fetchLive();
     lc0.appendChild(rf);
@@ -1689,6 +1695,7 @@ function schedulePush(){
 }
 async function pushActive(){
   const g=activeGame(); if(!g||!syncConfigured()) return;
+  if(!g.plays.length){ return; } // nothing to broadcast — keeps viewer devices silent
   lastPush=Date.now();
   try{
     const payload={type:'flagstats-live',updated:Date.now(),device:deviceId,game:g};
@@ -1717,7 +1724,7 @@ if(typeof window!=='undefined'&&window.addEventListener){
 }
 
 /* ---- LIVE VIEWER: poll other tablets' bins (read-only role) ---- */
-let liveGames={}, liveTimer=null, liveFetching=false;
+let liveGames={}, liveTimer=null, liveFetching=false, liveExpand={};
 function viewBinIds(){ return (prefs.viewBins||'').split(',').map(s=>s.trim()).filter(Boolean); }
 function viewerConfigured(){ return autoMode() || (viewBinIds().length && (prefs.syncKey||'').trim()); }
 async function fetchLive(){
