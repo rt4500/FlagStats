@@ -135,3 +135,12 @@ stay local and are pushed when the network returns.
 
 Without a `LIVE_CONFIG`, the app falls back to a manual JSONBin mode
 configurable in Options (API key + bin IDs per device).
+
+## Spectator page
+
+`live.html` is a public read-only live scoreboard: scores, game situation, and
+tap-to-expand player stats for every game currently being logged. Share
+`https://<your-username>.github.io/<repo-name>/live.html` with spectators (a QR
+code at the field works well). It polls every 30 s; the worker edge-caches the
+data so any number of spectators is fine. No install, no login, nothing to tamper
+with — it's read-only.

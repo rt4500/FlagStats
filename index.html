@@ -363,7 +363,11 @@ function deriveState(plays,s){
     const start=(typeof p.startSpot==='number')?p.startSpot:spot;
     let end=(typeof p.endSpot==='number')?p.endSpot:start;
     if(p.interception){ possession=possession==='home'?'away':'home';
-      spot=Math.max(0,Math.min(s.fieldLength,p.intReturnEndSpot!=null?p.intReturnEndSpot:s.fieldLength-start));
+      const ret=(p.intReturnEndSpot!=null)?p.intReturnEndSpot:(s.fieldLength-start);
+      if(ret>=s.fieldLength){ // pick-6
+        add(possession,6); awaitingPAT=true; patTeam=possession; continue;
+      }
+      spot=Math.max(0,Math.min(s.fieldLength,ret));
       down=1; seriesCrossedMid=spot>=s.midfield; continue; }
     if(p.touchdown||end>=s.fieldLength){ add(possession,6); awaitingPAT=true; patTeam=possession; continue; }
     spot=Math.max(0,Math.min(s.fieldLength,end));
@@ -378,7 +382,7 @@ function deriveState(plays,s){
    STATS (box score) computed from plays
    ============================================================ */
 function blankLine(){return{att:0,comp:0,passYds:0,passTD:0,int:0,tgt:0,rec:0,recYds:0,recTD:0,drops:0,
-  rushAtt:0,rushYds:0,rushTD:0,flags:0,tfl:0,sacks:0,pbu:0,defint:0,intRetYds:0,missedFlags:0,
+  rushAtt:0,rushYds:0,rushTD:0,flags:0,tfl:0,sacks:0,pbu:0,defint:0,intRetYds:0,intRetTD:0,missedFlags:0,
   convThrow:0,convMade:0,convPts:0};}
 function computeStats(game){
   const S=game.settings;
@@ -397,7 +401,9 @@ function computeStats(game){
       if(qb){ qb.att++; }
       const rec=ensure(off,p.receiver);
       if(p.receiver&&rec){ rec.tgt++; }
-      if(p.interception){ if(qb) qb.int++; const d=ensure(def,p.interceptedBy); if(d){d.defint++; d.intRetYds+=(p.intReturnYds||0);} }
+      if(p.interception){ if(qb) qb.int++; const d=ensure(def,p.interceptedBy);
+        if(d){ d.defint++; d.intRetYds+=(p.intReturnYds||0);
+          if(p.intReturnEndSpot!=null&&p.intReturnEndSpot>=S.fieldLength) d.intRetTD++; } }
       else if(p.complete){ if(qb){qb.comp++; qb.passYds+=gain;} if(rec){rec.rec++; rec.recYds+=gain;}
         if(p.touchdown){ if(qb)qb.passTD++; if(rec)rec.recTD++; } }
       else { // incomplete
@@ -642,19 +648,16 @@ function deriveStateWithPending(g){
   // preview state including the pending play's endSpot for the gain tag
   return deriveState(g.plays,g.settings);
 }
-function ballText(g,spot,posSide){
-  const S=g.settings, mid=S.midfield;
-  // express as "own X" / "opp X" from possessing team perspective
-  if(spot<=mid){ return 'Own '+spot; }
-  return 'Opp '+(S.fieldLength-spot);
-}
+function ballText(g,spot,posSide){ return posLabel(g,spot,posSide); }
 
 function buildField(g,st,posSide){
   const S=g.settings, L=S.fieldLength;
   const f=h(`<div class="field" id="fieldEl"></div>`);
-  // end zones: top = attacking (opp goal), bottom = own goal
-  f.appendChild(h(`<div class="ez top"><span>OPP GOAL</span></div>`));
-  f.appendChild(h(`<div class="ez bot"><span>OWN GOAL</span></div>`));
+  // end zones — labelled for whoever is attacking upward right now
+  const atkSide = (ui.step==='int_spot') ? (posSide==='home'?'away':'home') : posSide;
+  const defSideEz = atkSide==='home'?'away':'home';
+  f.appendChild(h(`<div class="ez top"><span>${esc(g.teams[defSideEz].name.toUpperCase())}</span></div>`));
+  f.appendChild(h(`<div class="ez bot"><span>${esc(g.teams[atkSide].name.toUpperCase())}</span></div>`));
   // playing area between 9% and 91%
   const top=9, bot=91, span=bot-top;
   const yToPct=(yard)=>{ // yard 0=own goal(bottom) .. L=opp goal(top)
@@ -680,19 +683,20 @@ function buildField(g,st,posSide){
   function showAt(yard){
     const pct=yToPct(yard);
     pmark.style.display='block'; pmark.style.top=pct+'%';
+    const atk=isInt()?(ui.pending.offense==='home'?'away':'home'):ui.pending.offense;
     let txt;
-    if(isInt()){ const catchAt=L-ui.pending.startSpot; const ret=Math.max(0,yard-catchAt); txt='ret '+ret+' yd'; }
-    else { const gain=yard-ui.pending.startSpot; txt=(gain>=0?'+':'')+gain+' yd'+(yard>=L?' · TD':''); }
+    if(isInt()){ const catchAt=L-ui.pending.startSpot; const ret=Math.max(0,yard-catchAt); txt='ret '+ret+(yard>=L?' · TD':' · '+posLabel(g,yard,atk)); }
+    else { const gain=yard-ui.pending.startSpot; txt=(gain>=0?'+':'')+gain+(yard>=L?' · TD':' · '+posLabel(g,yard,atk)); }
     ptag.style.display='block'; ptag.textContent=txt; ptag.style.top='calc('+pct+'% - 16px)';
     const rv=document.getElementById('posReadoutVal'), rg=document.getElementById('posReadoutGain');
     if(rv&&rg){
-      if(isInt()){ const catchAt=L-ui.pending.startSpot; rv.textContent=posLabel(g,yard); rg.textContent='return '+Math.max(0,yard-catchAt)+' yd'; }
-      else { const gain=yard-ui.pending.startSpot; rv.textContent=yard>=L?'Touchdown':posLabel(g,yard); rg.textContent=(gain>=0?'+':'')+gain+' yd'; }
+      if(isInt()){ const catchAt=L-ui.pending.startSpot; rv.textContent=yard>=L?'PICK-6!':posLabel(g,yard,atk); rg.textContent='return '+Math.max(0,yard-catchAt)+' yd'; }
+      else { const gain=yard-ui.pending.startSpot; rv.textContent=yard>=L?'Touchdown':posLabel(g,yard,atk); rg.textContent=(gain>=0?'+':'')+gain+' yd'; }
     }
   }
   function showAdjust(yard){
     ball.style.top=yToPct(yard)+'%';
-    const rv=document.getElementById('posReadoutVal'); if(rv) rv.textContent=posLabel(g,yard);
+    const rv=document.getElementById('posReadoutVal'); if(rv) rv.textContent=posLabel(g,yard,ui.adjust.possession);
   }
   // restore marker if a spot is already chosen
   if(ui.pending){
@@ -752,7 +756,7 @@ function buildPanel(g,st){
     wrap.appendChild(modeToggle());
     wrap.appendChild(h(`<div class="readout" id="posReadout" style="margin-top:2px">
       <div class="lbl">${inputMode==='field'?'Ball on — tap or drag the field':'Ball on'}</div>
-      <div class="rv" id="posReadoutVal">${esc(posLabel(g,a.spot))}</div></div>`));
+      <div class="rv" id="posReadoutVal">${esc(posLabel(g,a.spot,a.possession))}</div></div>`));
     if(inputMode==='numeric'){
       const setSpot=(v)=>{ a.spot=Math.max(0,Math.min(L,Math.round(v))); render(); };
       const mkRow=(pairs)=>{ const r=grid('c3'); r.style.marginBottom='8px';
@@ -1016,9 +1020,18 @@ function defenderRow(g,defSide){
   wrap.appendChild(playerPicker(rosterOf(g,defSide),ui.pending[field],pid=>{ui.pending[field]=pid;render();}));
   return wrap;
 }
-function posLabel(g,yard){ const L=g.settings.fieldLength, mid=g.settings.midfield;
-  if(yard<=0) return 'Own goal'; if(yard>=L) return 'Goal line';
-  if(yard===mid) return 'Midfield'; if(yard<mid) return 'Own '+yard; return 'Opp '+(L-yard); }
+const IOC_CODES={'Switzerland':'SUI','Ireland':'IRL','Sweden':'SWE','Ukraine':'UKR','Poland':'POL','Czechia':'CZE','Finland':'FIN','Germany':'GER','Austria':'AUT','France':'FRA','Italy':'ITA','Great Britain':'GBR'};
+function teamCode(g,side){ const n=g.teams[side].name; return IOC_CODES[n]||n.slice(0,3).toUpperCase(); }
+function posLabel(g,yard,off){ const L=g.settings.fieldLength, mid=g.settings.midfield;
+  if(!off){ // fallback without team context
+    if(yard<=0) return 'Own goal'; if(yard>=L) return 'Goal line';
+    if(yard===mid) return 'Midfield'; if(yard<mid) return 'Own '+yard; return 'Opp '+(L-yard); }
+  const def=off==='home'?'away':'home';
+  if(yard<=0) return teamCode(g,off)+' goal';
+  if(yard>=L) return 'Goal line';
+  if(yard===mid) return 'Midfield';
+  if(yard<mid) return teamCode(g,off)+' '+yard;
+  return teamCode(g,def)+' '+(L-yard); }
 function modeToggle(){
   const wrap=h(`<div class="modeToggle"></div>`);
   const mk=(id,label)=>{ const b=h(`<button class="mt ${inputMode===id?'on':''}">${label}</button>`); b.onclick=()=>setInputMode(id); return b; };
@@ -1045,8 +1058,9 @@ function spotReadout(g){
   const val = isInt ? ui.pending.intReturnEndSpot : ui.pending.endSpot;
   let posTxt='—', gainTxt='drag the field';
   if(val!=null){
-    if(isInt){ const catchAt=g.settings.fieldLength-ui.pending.startSpot; posTxt=posLabel(g,val); gainTxt='return '+Math.max(0,val-catchAt)+' yd'; }
-    else { const gn=val-ui.pending.startSpot; posTxt=val>=g.settings.fieldLength?'Touchdown':posLabel(g,val); gainTxt=(gn>=0?'+':'')+gn+' yd'; }
+    const atk=isInt?(ui.pending.offense==='home'?'away':'home'):ui.pending.offense;
+    if(isInt){ const catchAt=g.settings.fieldLength-ui.pending.startSpot; posTxt=val>=g.settings.fieldLength?'PICK-6!':posLabel(g,val,atk); gainTxt='return '+Math.max(0,val-catchAt)+' yd'; }
+    else { const gn=val-ui.pending.startSpot; posTxt=val>=g.settings.fieldLength?'Touchdown':posLabel(g,val,atk); gainTxt=(gn>=0?'+':'')+gn+' yd'; }
   }
   wrap.appendChild(h(`<div class="lbl">Ball on</div>`));
   wrap.appendChild(h(`<div class="rv" id="posReadoutVal">${esc(posTxt)}</div>`));
@@ -1072,15 +1086,16 @@ function saveRow(g,allowTD){
 function pName(g,side,pid){ if(!pid) return null; const p=rosterOf(g,side).find(x=>x.id===pid); return p?('#'+p.num):null; }
 function describePlay(g,p,pre){
   const off=pre.possession, def=off==='home'?'away':'home';
-  const offN=g.teams[off].name.slice(0,3).toUpperCase();
+  const offN=teamCode(g,off);
   const gain=(typeof p.endSpot==='number'&&typeof p.startSpot==='number')?(p.endSpot-p.startSpot):0;
   const yd=(n)=>((n>=0?'+':'')+n);
-  let situ = pre.awaitingPAT ? `${offN} · PAT` : `${offN} · ${pre.down}${['st','nd','rd','th'][Math.min(pre.down,4)-1]} · ${posLabel(g,pre.spot)}`;
+  let situ = pre.awaitingPAT ? `${offN} · PAT` : `${offN} · ${pre.down}${['st','nd','rd','th'][Math.min(pre.down,4)-1]} · ${posLabel(g,pre.spot,off)}`;
   if(prefs.clock && p.half) situ = `H${p.half} ${p.clock!=null?fmtClock(p.clock):''} · `+situ;
   let desc='', scoring=false;
   if(p.type==='pass'){
     const qb=pName(g,off,p.passer)||'QB';
-    if(p.interception){ desc=`${qb} INTERCEPTED by ${pName(g,def,p.interceptedBy)||'?'}${p.intReturnYds?` · ret ${p.intReturnYds}`:''}`; scoring=true; }
+    if(p.interception){ const p6=(p.intReturnEndSpot!=null&&p.intReturnEndSpot>=g.settings.fieldLength);
+      desc=`${qb} INTERCEPTED by ${pName(g,def,p.interceptedBy)||'?'}${p.intReturnYds?` · ret ${p.intReturnYds}`:''}${p6?' · PICK-6 TOUCHDOWN':''}`; scoring=true; }
     else if(p.complete){ desc=`${qb} → ${pName(g,off,p.receiver)||'?'} ${yd(gain)}${p.touchdown?' · TOUCHDOWN':''}${p.flagPullBy?` · flag ${pName(g,def,p.flagPullBy)}`:''}${p.missedFlagBy?` · missed ${pName(g,def,p.missedFlagBy)}`:''}`; scoring=p.touchdown; }
     else { desc=`${qb} incomplete${p.receiver?` (→ ${pName(g,off,p.receiver)})`:''}${p.incompleteReason?` · ${p.incompleteReason}`:''}${p.defendedBy?` by ${pName(g,def,p.defendedBy)}`:''}`; }
   }
@@ -1140,7 +1155,7 @@ function buildPlayEditor(g,p,idx,pre){
   if(p.type==='run'){ pick('Ball carrier',off,'rusher'); pick(p.touchdown?'Missed flag':'Flag pull',def,p.touchdown?'missedFlagBy':'flagPullBy'); }
   if(p.type==='sack'){ pick('Sack by',def,'sackBy'); }
   if(!p.interception && typeof p.endSpot==='number'){
-    box.appendChild(h(`<div class="lbl" style="margin:8px 0 4px">End spot: <span class="num">${esc(posLabel(g,p.endSpot))}</span> (${(p.endSpot-p.startSpot>=0?'+':'')}${p.endSpot-p.startSpot} yd)</div>`));
+    box.appendChild(h(`<div class="lbl" style="margin:8px 0 4px">End spot: <span class="num">${esc(posLabel(g,p.endSpot,pre.possession))}</span> (${(p.endSpot-p.startSpot>=0?'+':'')}${p.endSpot-p.startSpot} yd)</div>`));
     const r=h(`<div class="btnGrid c4" style="margin-bottom:6px"></div>`);
     [[-5,'−5'],[-1,'−1'],[1,'+1'],[5,'+5']].forEach(([dv,l])=>{
       const b=h(`<button class="btn sm ghost">${l}</button>`);
@@ -1207,13 +1222,13 @@ function buildGameReport(g){
   g.plays.forEach(p=>{ const pre=deriveState(sim,S); const d=describePlay(g,p,pre);
     if(d.scoring){ const tag=prefs.clock&&p.half?`[H${p.half} ${p.clock!=null?fmtClock(p.clock):''}] `:'';
       const tm=pre.awaitingPAT?pre.patTeam:pre.possession;
-      lines.push(`  ${tag}${g.teams[tm].name.slice(0,3).toUpperCase()}: ${d.desc}`); }
+      lines.push(`  ${tag}${teamCode(g,tm)}: ${d.desc}`); }
     sim.push(p); });
   lines.push('');
   ['home','away'].forEach(sd=>{
     lines.push(g.teams[sd].name.toUpperCase());
     lines.push(`  Yards ${tt[sd].yds} (pass ${tt[sd].passYds} / rush ${tt[sd].rushYds}) · TO ${dr[sd].tos}`);
-    lines.push(`  Drives ${dr[sd].drives} · ${dr[sd].ptsPerDrive.toFixed(1)} pts/drive · avg start ${posLabel(g,Math.round(dr[sd].avgStart))} · 4th down ${dr[sd].fourthConv}/${dr[sd].fourthAtt}`);
+    lines.push(`  Drives ${dr[sd].drives} · ${dr[sd].ptsPerDrive.toFixed(1)} pts/drive · avg start ${posLabel(g,Math.round(dr[sd].avgStart),sd)} · 4th down ${dr[sd].fourthConv}/${dr[sd].fourthAtt}`);
     const rows=rosterOf(g,sd).map(p=>({p,s:stats[sd][p.id]})).filter(x=>x.s);
     rows.filter(x=>x.s.att>0).forEach(({p,s})=>lines.push(`  QB #${p.num} ${p.name}: ${s.comp}/${s.att}, ${s.passYds} yds, ${s.passTD} TD, ${s.int} INT, RTG ${passerRating(s)}`));
     const topR=rows.filter(x=>x.s.recYds>0).sort((a,b)=>b.s.recYds-a.s.recYds).slice(0,3);
@@ -1260,7 +1275,7 @@ function buildBoxScore(g){
     wrap.appendChild(h(`<div class="help" style="margin-bottom:6px">
       ${tt[side].yds} yds (pass ${tt[side].passYds} / rush ${tt[side].rushYds}) ·
       ${d.drives} drives · ${d.ptsPerDrive.toFixed(1)} pts/drive ·
-      avg start ${esc(posLabel(g,Math.round(d.avgStart)))} ·
+      avg start ${esc(posLabel(g,Math.round(d.avgStart),side))} ·
       4th down ${d.fourthConv}/${d.fourthAtt} · TO ${d.tos}</div>`));
     // Offense table
     const off=rows.filter(x=>x.s.att||x.s.rec||x.s.rushAtt);
@@ -1550,7 +1565,7 @@ function renderTourney(){
       const g=rec.game; const st=deriveState(g.plays,g.settings);
       const ago=Math.max(0,Math.round((Date.now()-rec.updated)/1000));
       const posN=g.teams[st.possession].name;
-      const situ=st.awaitingPAT?'PAT':`${st.down}${['st','nd','rd','th'][Math.min(st.down,4)-1]} · ${posLabel(g,st.spot)}`;
+      const situ=st.awaitingPAT?'PAT':`${st.down}${['st','nd','rd','th'][Math.min(st.down,4)-1]} · ${posLabel(g,st.spot,st.possession)}`;
       const clockTag=(g.clock&&g.clock.half)?` · H${g.clock.half}`:'';
       const item=h(`<div class="gameItem" style="cursor:pointer"><div style="flex:1">
         <div style="font-weight:800">${esc(g.teams.home.name)} <span class="num">${st.home}–${st.away}</span> ${esc(g.teams.away.name)}${g.finished?'<span class="finalBadge">FINAL</span>':''}</div>
@@ -1628,11 +1643,11 @@ function renderTourney(){
   leader(lc,'Passing TD',l=>l.passTD,l=>l.passTD);
   leader(lc,'Receiving yards',l=>l.recYds,l=>l.recYds+' ('+l.rec+' rec)');
   leader(lc,'Rushing yards',l=>l.rushYds,l=>l.rushYds);
-  leader(lc,'Total TD',l=>l.passTD+l.recTD+l.rushTD,l=>l.passTD+l.recTD+l.rushTD);
+  leader(lc,'Total TD',l=>l.passTD+l.recTD+l.rushTD+l.intRetTD,l=>l.passTD+l.recTD+l.rushTD+l.intRetTD);
   leader(lc,'Conversion points',l=>l.convPts,l=>l.convPts);
   leader(lc,'Flag pulls',l=>l.flags,l=>l.flags);
   leader(lc,'Sacks',l=>l.sacks,l=>l.sacks);
-  leader(lc,'Interceptions (def)',l=>l.defint,l=>l.defint);
+  leader(lc,'Interceptions (def)',l=>l.defint,l=>l.defint+(l.intRetTD?` (${l.intRetTD} TD)`:''));
   leader(lc,'Pass breakups',l=>l.pbu,l=>l.pbu);
   root.appendChild(lc);
 
@@ -1642,7 +1657,7 @@ function renderTourney(){
   exp.appendChild(csvBtn); root.appendChild(exp);
 }
 function downloadTourneyCSV(all){
-  const cols=['team','num','name','att','comp','passYds','passTD','int','tgt','rec','recYds','recTD','drops','rushAtt','rushYds','rushTD','flags','tfl','sacks','pbu','defint','intRetYds','missedFlags','convThrow','convMade','convPts'];
+  const cols=['team','num','name','att','comp','passYds','passTD','int','tgt','rec','recYds','recTD','drops','rushAtt','rushYds','rushTD','flags','tfl','sacks','pbu','defint','intRetYds','intRetTD','missedFlags','convThrow','convMade','convPts'];
   let csv=cols.join(',')+'\n';
   all.forEach(a=>{ const row=cols.map(c=>{ if(c in a) return csvCell(a[c]); return a.line[c]??0; }); csv+=row.join(',')+'\n'; });
   downloadBlob(csv,'nations-cup-stats.csv','text/csv');

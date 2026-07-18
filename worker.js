@@ -16,7 +16,7 @@
    5. Deploy, copy the workers.dev URL into LIVE_CONFIG.url in index.html, push.
 */
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const cors = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET,PUT,OPTIONS',
@@ -45,13 +45,21 @@ export default {
       return new Response(v || 'null', { headers: { ...cors, 'Content-Type': 'application/json' } });
     }
     if (req.method === 'GET') {
+      // Edge-cache the list for 10 s so many spectators cost ~1 KV read burst per 10 s.
+      const cache = caches.default;
+      const hit = await cache.match(req);
+      if (hit) return hit;
       const list = await env.LIVE.list({ prefix: 'g:' });
       const out = [];
       for (const k of list.keys) {
         const v = await env.LIVE.get(k.name);
         if (v) { try { out.push(JSON.parse(v)); } catch {} }
       }
-      return new Response(JSON.stringify(out), { headers: { ...cors, 'Content-Type': 'application/json' } });
+      const resp = new Response(JSON.stringify(out), {
+        headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, s-maxage=10, max-age=5' },
+      });
+      ctx.waitUntil(cache.put(req, resp.clone()));
+      return resp;
     }
     return new Response('bad request', { status: 400, headers: cors });
   },
