@@ -1598,6 +1598,15 @@ function renderTourney(){
     toast(n+' game(s) loaded'); render(); };
   const useLocal=h(`<button class="btn sm ghost">Add games from this device</button>`);
   useLocal.onclick=()=>{ games.forEach(g=>{ if(!tourneyGames.some(x=>x.id===g.id)) tourneyGames.push(JSON.parse(JSON.stringify(g))); }); render(); };
+  if(viewerConfigured()){
+    const fromLive=h(`<button class="btn sm green">Load games from live server</button>`);
+    fromLive.onclick=async()=>{ toast('Fetching from server…'); await fetchLive(true);
+      let n=0;
+      Object.values(liveGames).forEach(rec=>{ const g=rec.game;
+        if(g&&g.plays&&g.plays.length&&!tourneyGames.some(x=>x.id===g.id)){ tourneyGames.push(JSON.parse(JSON.stringify(g))); n++; } });
+      toast(n+' game(s) loaded from server'); render(); };
+    imp.appendChild(fromLive);
+  }
   const clr=h(`<button class="btn sm ghost">Clear</button>`); clr.onclick=()=>{tourneyGames=[];render();};
   imp.appendChild(fileBtn);imp.appendChild(useLocal);imp.appendChild(clr);imp.appendChild(input);
   card.appendChild(imp);
@@ -1719,7 +1728,8 @@ async function pushActive(){
     let r;
     if(autoMode()){
       const q=LIVE_CONFIG.token?('?t='+encodeURIComponent(LIVE_CONFIG.token)):'';
-      r=await fetch(LIVE_CONFIG.url.replace(/\/$/,'')+'/g/'+deviceId+q,{
+      // one slot PER GAME (not per device): finished games stay on the relay
+      r=await fetch(LIVE_CONFIG.url.replace(/\/$/,'')+'/g/'+deviceId+'-'+g.id+q,{
         method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     } else {
       r=await fetch('https://api.jsonbin.io/v3/b/'+prefs.syncBin.trim(),{
@@ -1756,7 +1766,7 @@ async function fetchLive(force){
         let arr=null;
         try{ arr=await r.json(); }catch(e){ liveStatus='error: unexpected response (not JSON)'; }
         if(Array.isArray(arr)){
-          arr.forEach(rec=>{ if(rec&&rec.game) liveGames[rec.device||rec.game.id]=rec; });
+          arr.forEach(rec=>{ if(rec&&rec.game) liveGames[rec.game.id||rec.device]=rec; });
           liveStatus='last check '+new Date().toLocaleTimeString()+' · '+arr.length+' broadcast(s) on server';
         } else if(arr!==null){ liveStatus='error: unexpected response shape'; }
       }
