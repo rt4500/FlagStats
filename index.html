@@ -1644,10 +1644,12 @@ function renderTourney(){
   tourneyGames.forEach(g=>{
     const stats=computeStats(g);
     ['home','away'].forEach(side=>{
-      rosterOf(g,side).forEach(p=>{ const s=stats[side][p.id]; if(!s)return;
-        const key=g.teams[side].name+'|'+p.num;
+      const roster=rosterOf(g,side);
+      Object.entries(stats[side]).forEach(([pid,s])=>{
+        const p=roster.find(x=>x.id===pid)||{num:'?',name:''};
+        const key=g.teams[side].name+'|'+p.num+'|'+(p.num==='?'?pid:'');
         if(!agg[key]) agg[key]={team:g.teams[side].name,num:p.num,name:p.name||'',line:blankLine()};
-        for(const k in s) agg[key].line[k]+=s[k];
+        for(const k in s) agg[key].line[k]=(agg[key].line[k]||0)+s[k];
       });
     });
   });
@@ -1660,6 +1662,7 @@ function renderTourney(){
     t+=`</tbody></table>`; card2.appendChild(h(t));
   };
   const lc=h(`<div class="card"><h3>Leaders</h3></div>`);
+  if(!all.length){ lc.appendChild(h(`<div class="help">The loaded games contain no player attributions yet (only scores/quick entries). Player stats appear here once plays are logged with players.</div>`)); }
   leader(lc,'Passing yards',l=>l.passYds,l=>l.passYds);
   leader(lc,'Passing TD',l=>l.passTD,l=>l.passTD);
   leader(lc,'Receiving yards',l=>l.recYds,l=>l.recYds+' ('+l.rec+' rec)');

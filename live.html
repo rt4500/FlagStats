@@ -42,6 +42,7 @@
   <h1>Nations Cup Prague 2026</h1>
   <div class="sub">Women's Flag Football · live scores &amp; stats · updates automatically</div>
   <div id="games"><div class="empty">Waiting for live games…</div></div>
+  <div id="tables"></div>
   <div class="status" id="status"></div>
 </div>
 <script>
@@ -195,7 +196,8 @@ function render(){
   const root=document.getElementById('games');
   const entries=Object.entries(live).filter(([k,r])=>r.game&&r.game.plays&&r.game.plays.length>0)
     .sort((a,b)=>b[1].updated-a[1].updated);
-  if(!entries.length){ root.innerHTML='<div class="empty">Waiting for live games…</div>'; return; }
+  if(!entries.length){ root.innerHTML='<div class="empty">Waiting for live games…</div>'; }
+  else{
   root.innerHTML='';
   entries.forEach(([dev,rec])=>{
     const g=rec.game, st=deriveState(g.plays,g.settings);
@@ -214,6 +216,86 @@ function render(){
     card.querySelector('.toggle').onclick=()=>{ expand[dev]=!expand[dev]; render(); };
     root.appendChild(card);
   });
+  }
+  renderTables();
+}
+
+/* ---- Standings · Leaders · Bracket (from all received games) ---- */
+function allGames(){ return Object.values(live).map(r=>r.game).filter(g=>g&&g.plays&&g.plays.length); }
+function standingsRows(){
+  const tbl={}; const row=n=>tbl[n]||(tbl[n]={team:n,pld:0,w:0,d:0,l:0,gf:0,ga:0});
+  allGames().filter(g=>g.finished).forEach(g=>{
+    const st=deriveState(g.plays,g.settings);
+    const H=row(g.teams.home.name), A=row(g.teams.away.name);
+    H.pld++; A.pld++; H.gf+=st.home; H.ga+=st.away; A.gf+=st.away; A.ga+=st.home;
+    if(st.home>st.away){H.w++;A.l++;} else if(st.home<st.away){A.w++;H.l++;} else {H.d++;A.d++;}
+  });
+  const rows=Object.values(tbl).map(r=>({...r,gd:r.gf-r.ga,pct:r.pld?((r.w+0.5*r.d)/r.pld):0}));
+  rows.sort((a,b)=>b.pct-a.pct||b.gd-a.gd||b.gf-a.gf||a.team.localeCompare(b.team));
+  return rows;
+}
+function leaderRows(){
+  const agg={};
+  allGames().forEach(g=>{
+    const stats=computeStats(g);
+    ['home','away'].forEach(side=>{
+      const roster=g.teams[side].players||[];
+      Object.entries(stats[side]).forEach(([pid,s])=>{
+        const p=roster.find(x=>x.id===pid)||{num:'?',name:''};
+        const key=g.teams[side].name+'|'+p.num+'|'+(p.num==='?'?pid:'');
+        if(!agg[key]) agg[key]={team:g.teams[side].name,num:p.num,name:p.name||'',line:blankLine()};
+        for(const k in s) agg[key].line[k]=(agg[key].line[k]||0)+s[k];
+      });
+    });
+  });
+  return Object.values(agg);
+}
+function renderTables(){
+  const root=document.getElementById('tables'); if(!root) return;
+  let html='';
+  const st=standingsRows();
+  const finals=allGames().filter(g=>g.finished).length;
+  if(st.length){
+    html+='<div class="card"><div class="teamHead" style="margin-top:0">Standings ('+finals+' of 21 group games final)</div>';
+    html+='<table><thead><tr><th>Team</th><th>PLD</th><th>W</th><th>L</th><th>PCT</th><th>GD</th></tr></thead><tbody>';
+    st.forEach((r,i)=>{ html+='<tr><td>'+(i+1)+' '+esc(r.team)+'</td><td class="num">'+r.pld+'</td><td class="num">'+r.w+
+      '</td><td class="num">'+r.l+'</td><td class="num"><b>'+r.pct.toFixed(3).replace(/^0/,'')+'</b></td><td class="num">'+r.gd+'</td></tr>'; });
+    html+='</tbody></table></div>';
+  }
+  const all=leaderRows();
+  if(all.length){
+    html+='<div class="card"><div class="teamHead" style="margin-top:0">Tournament leaders</div>';
+    const lead=(title,fn,fmt)=>{
+      const s2=all.filter(a=>fn(a.line)>0).sort((a,b)=>fn(b.line)-fn(a.line)).slice(0,5);
+      if(!s2.length) return;
+      html+='<div class="teamHead">'+title+'</div><table><tbody>';
+      s2.forEach(a=>{ html+='<tr><td>#'+esc(a.num)+' '+esc(a.name)+' <span style="color:var(--muted);font-size:10px">'+esc(a.team)+'</span></td><td class="num">'+fmt(a.line)+'</td></tr>'; });
+      html+='</tbody></table>';
+    };
+    lead('Passing yards',l=>l.passYds,l=>l.passYds);
+    lead('Receiving yards',l=>l.recYds,l=>l.recYds+' ('+l.rec+')');
+    lead('Rushing yards',l=>l.rushYds,l=>l.rushYds);
+    lead('Touchdowns',l=>l.passTD+l.recTD+l.rushTD+l.intRetTD,l=>l.passTD+l.recTD+l.rushTD+l.intRetTD);
+    lead('Flag pulls',l=>l.flags,l=>l.flags);
+    lead('Interceptions',l=>l.defint,l=>l.defint+(l.intRetTD?' ('+l.intRetTD+' TD)':''));
+    html+='</div>';
+  }
+  if(st.length>=2){
+    const seed=(n)=>st[n-1]?esc(st[n-1].team):'—';
+    const prov=finals<21?' <span style="color:var(--amber)">(provisional)</span>':'';
+    html+='<div class="card"><div class="teamHead" style="margin-top:0">Sunday bracket preview'+prov+'</div>';
+    html+='<table><tbody>'+
+      '<tr><td>QF2 · 09:00</td><td class="num">'+seed(4)+' vs '+seed(5)+'</td></tr>'+
+      '<tr><td>QF3 · 09:00</td><td class="num">'+seed(2)+' vs '+seed(7)+'</td></tr>'+
+      '<tr><td>QF4 · 10:15</td><td class="num">'+seed(3)+' vs '+seed(6)+'</td></tr>'+
+      '<tr><td>SF1 · 11:30</td><td class="num">'+seed(1)+' vs winner QF2</td></tr>'+
+      '<tr><td>SF2 · 11:30</td><td class="num">winner QF3 vs winner QF4</td></tr>'+
+      '<tr><td>3rd place · 14:00</td><td class="num">losers of the semis</td></tr>'+
+      '<tr><td>Final · 15:15</td><td class="num">winners of the semis</td></tr>'+
+      '</tbody></table>'+
+      '<div class="meta" style="text-align:left;margin-top:6px">Seeding from current standings · 1st seed has a bye into Semi Final 1.</div></div>';
+  }
+  root.innerHTML=html;
 }
 async function poll(){
   const el=document.getElementById('status');
