@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Flag Stats — Live Tracker</title>
 <meta name="theme-color" content="#14171C">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://flagstats-live.trizzey11.workers.dev https://api.jsonbin.io; manifest-src 'self'; worker-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -216,6 +218,18 @@ const LIVE_CONFIG={
 };
 let deviceId=store.load('fs_device',null);
 if(!deviceId){ deviceId=Math.random().toString(36).slice(2,10)+Math.random().toString(36).slice(2,10); store.save('fs_device',deviceId); }
+/* Keeper key: arrives once via a magic link (#k=...), then lives on the device.
+   Devices without a key are read-only viewers — they never broadcast. */
+let writeKey=store.load('fs_writekey','');
+let _keyJustSet=false;
+try{
+  if(typeof location!=='undefined'){
+    const mk=(location.hash&&location.hash.match(/[#&]k=([\w-]{4,64})/))||(location.search&&location.search.match(/[?&]k=([\w-]{4,64})/));
+    if(mk){ writeKey=mk[1]; store.save('fs_writekey',writeKey); _keyJustSet=true;
+      if(typeof history!=='undefined'&&history.replaceState) history.replaceState(null,'',location.pathname); }
+  }
+}catch(e){}
+function writeCred(){ return writeKey||LIVE_CONFIG.token||''; }
 let prefs=store.load('fs_prefs',{clock:false,bigui:false,spotter:false});
 function setPref(k,v){ prefs[k]=v; store.save('fs_prefs',prefs); applyPrefs(); render(); }
 function applyPrefs(){ document.body.classList.toggle('bigui',!!prefs.bigui); }
@@ -542,6 +556,7 @@ function cancelAdjust(){ ui.adjust=null; ui.step='idle'; render(); }
    ============================================================ */
 function h(html){ const d=document.createElement('div'); d.innerHTML=html.trim(); return d.firstChild; }
 function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function unsafeKey(k){ return k==='__proto__'||k==='constructor'||k==='prototype'; }
 
 function renderGame(){
   const root=document.getElementById('view-game');
@@ -1447,7 +1462,9 @@ function renderSetup(){
   // live sync settings
   if(LIVE_CONFIG.url){
     const on=prefs.syncOn!==false; // built-in: on unless explicitly off
-    const row=h(`<div class="teamRow"><div><div style="font-weight:800">Live sync (built-in)</div><div class="meta">Broadcasts the active game automatically · no setup needed</div></div></div>`);
+    const roleTxt = writeKey ? 'Keeper link active — this device broadcasts its games'
+                             : (LIVE_CONFIG.token ? 'Broadcasting (legacy token)' : 'Viewer only — open a keeper link once to broadcast');
+    const row=h(`<div class="teamRow"><div><div style="font-weight:800">Live sync (built-in)</div><div class="meta">${roleTxt}</div></div></div>`);
     const b=h(`<button class="btn sm ${on?'amber':'ghost'}">${on?'On':'Off'}</button>`);
     b.onclick=()=>setPref('syncOn', on?false:true);
     row.appendChild(b); oc.appendChild(row);
@@ -1496,7 +1513,7 @@ function renderSetup(){
   impInput.onchange=async(e)=>{ const f=e.target.files[0]; if(!f) return;
     try{ const obj=JSON.parse(await f.text());
       if(obj&&obj.type==='flagstats-teams'&&obj.teams){
-        let n=0; for(const k in obj.teams){ teams[k]=obj.teams[k]; n++; }
+        let n=0; for(const k in obj.teams){ if(unsafeKey(k)) continue; teams[k]=obj.teams[k]; n++; }
         persist(); render(); toast(n+' team(s) imported (rosters replaced)');
       } else toast('Not a roster file');
     }catch(err){ toast('Bad roster file'); } };
@@ -1686,7 +1703,9 @@ function downloadTourneyCSV(all){
   all.forEach(a=>{ const row=cols.map(c=>{ if(c in a) return csvCell(a[c]); return a.line[c]??0; }); csv+=row.join(',')+'\n'; });
   downloadBlob(csv,'nations-cup-stats.csv','text/csv');
 }
-function csvCell(v){ v=String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+function csvCell(v){ v=String(v);
+  if(/^[=+\-@\t\r]/.test(v)) v="'"+v; // neutralize spreadsheet formula injection
+  return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
 
 /* ============================================================
    EXPORT / DOWNLOAD
@@ -1725,7 +1744,7 @@ async function shareGame(g){
 let syncTimer=null, lastPush=0;
 function autoMode(){ return !!LIVE_CONFIG.url && prefs.syncOn!==false; } // built-in config: on by default, opt-out via toggle
 function manualMode(){ return !LIVE_CONFIG.url && prefs.syncOn && (prefs.syncKey||'').trim() && (prefs.syncBin||'').trim(); }
-function syncConfigured(){ return autoMode()||manualMode(); }
+function syncConfigured(){ return (autoMode()&&!!writeCred())||manualMode(); }
 function schedulePush(){
   if(!syncConfigured()) return;
   clearTimeout(syncTimer);
@@ -1742,7 +1761,7 @@ async function pushActive(){
     const payload={type:'flagstats-live',updated:Date.now(),device:deviceId,game:g};
     let r;
     if(autoMode()){
-      const q=LIVE_CONFIG.token?('?t='+encodeURIComponent(LIVE_CONFIG.token)):'';
+      const q=writeKey?('?k='+encodeURIComponent(writeKey)):(LIVE_CONFIG.token?('?t='+encodeURIComponent(LIVE_CONFIG.token)):'');
       // one slot PER GAME (not per device): finished games stay on the relay
       r=await fetch(LIVE_CONFIG.url.replace(/\/$/,'')+'/g/'+deviceId+'-'+g.id+q,{
         method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
@@ -1768,20 +1787,23 @@ if(typeof window!=='undefined'&&window.addEventListener){
 /* ---- LIVE VIEWER: poll other tablets' bins (read-only role) ---- */
 let liveGames={}, liveTimer=null, liveFetching=false, liveExpand={}, liveStatus='';
 function viewBinIds(){ return (prefs.viewBins||'').split(',').map(s=>s.trim()).filter(Boolean); }
-function viewerConfigured(){ return autoMode() || (viewBinIds().length && (prefs.syncKey||'').trim()); }
+function viewerConfigured(){ return (!!LIVE_CONFIG.url && prefs.syncOn!==false) || (viewBinIds().length && (prefs.syncKey||'').trim()); }
 async function fetchLive(force){
   if(liveFetching && !force) return;
   liveFetching=true;
   try{
     if(autoMode()){
-      const q=LIVE_CONFIG.token?('?t='+encodeURIComponent(LIVE_CONFIG.token)):'';
-      const r=await fetch(LIVE_CONFIG.url.replace(/\/$/,'')+'/g'+q,{cache:'no-store'});
+      let r=await fetch(LIVE_CONFIG.url.replace(/\/$/,'')+'/g',{cache:'no-store'});
+      if(r.status===403&&LIVE_CONFIG.token){ // legacy worker still token-gating reads
+        r=await fetch(LIVE_CONFIG.url.replace(/\/$/,'')+'/g?t='+encodeURIComponent(LIVE_CONFIG.token),{cache:'no-store'}); }
       if(!r.ok){ liveStatus='error: server said '+r.status+(r.status===403?' (token mismatch)':''); }
       else {
         let arr=null;
         try{ arr=await r.json(); }catch(e){ liveStatus='error: unexpected response (not JSON)'; }
         if(Array.isArray(arr)){
-          arr.forEach(rec=>{ if(rec&&rec.game) liveGames[rec.game.id||rec.device]=rec; });
+          arr.forEach(rec=>{ if(!rec||!rec.game) return;
+            const k=String(rec.game.id||rec.device||''); if(!k||unsafeKey(k)) return;
+            liveGames[k]=rec; });
           liveStatus='last check '+new Date().toLocaleTimeString()+' · '+arr.length+' broadcast(s) on server';
         } else if(arr!==null){ liveStatus='error: unexpected response shape'; }
       }

@@ -25,19 +25,41 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { headers: cors });
 
     const url = new URL(req.url);
-    const token = env.TOKEN || '';
-    if (token && url.searchParams.get('t') !== token)
-      return new Response('forbidden', { status: 403, headers: cors });
-
     const m = url.pathname.match(/^\/g(?:\/([\w-]{4,64}))?\/?$/);
     if (!m) return new Response('not found', { status: 404, headers: cors });
     const id = m[1];
 
+    // Auth model: READS are public (scores are public data).
+    // WRITES require a keeper key from the KEYS variable — a JSON map of
+    //   { "key-string": "device-name" }, e.g.
+    //   {"f1-7kq2m9x4":"field1","f2-3vp8n5t1":"field2","hub-9rw4c6z8":"hub"}
+    // Each key can only write inside its own device namespace, so a leaked
+    // Field 1 key can never touch Field 2's games.
+    // Legacy fallback: if KEYS is not set, the old single TOKEN variable is used.
     if (req.method === 'PUT' && id) {
+      let keys = null;
+      try { keys = env.KEYS ? JSON.parse(env.KEYS) : null; } catch {}
+      const provided = url.searchParams.get('k') || url.searchParams.get('t') || '';
+      let ns = '';
+      if (keys) {
+        const name = keys[provided];
+        if (!name) return new Response('forbidden', { status: 403, headers: cors });
+        ns = String(name).replace(/[^\w-]/g, '') + ':';
+      } else if (env.TOKEN) {
+        if (provided !== env.TOKEN) return new Response('forbidden', { status: 403, headers: cors });
+      }
       const body = await req.text();
       if (body.length > 250000) return new Response('too big', { status: 413, headers: cors });
       try { JSON.parse(body); } catch { return new Response('bad json', { status: 400, headers: cors }); }
-      await env.LIVE.put('g:' + id, body, { expirationTtl: 60 * 60 * 24 * 7 });
+      const storeKey = 'g:' + ns + id;
+      // cap total stored games: updates to existing slots always allowed,
+      // new slots rejected past 200 (prevents storage-exhaustion abuse)
+      const existing = await env.LIVE.get(storeKey);
+      if (!existing) {
+        const l = await env.LIVE.list({ prefix: 'g:', limit: 201 });
+        if (l.keys.length >= 200) return new Response('storage full', { status: 429, headers: cors });
+      }
+      await env.LIVE.put(storeKey, body, { expirationTtl: 60 * 60 * 24 * 7 });
       return new Response('ok', { headers: cors });
     }
     if (req.method === 'GET' && id) {

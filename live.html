@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Nations Cup Prague — Live</title>
 <meta name="theme-color" content="#14171C">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src https://flagstats-live.trizzey11.workers.dev; base-uri 'self'; form-action 'self'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
 <style>
   :root{--bg:#14171C;--panel:#1D222A;--panel2:#262D37;--line:#333B46;--ink:#EDF1F5;
     --muted:#8A95A3;--green:#1FA35F;--amber:#F2B138;--red:#E5484D;
@@ -300,11 +302,13 @@ function renderTables(){
 async function poll(){
   const el=document.getElementById('status');
   try{
-    const q=LIVE_CONFIG.token?('?t='+encodeURIComponent(LIVE_CONFIG.token)):'';
-    const r=await fetch(LIVE_CONFIG.url.replace(/\/$/,'')+'/g'+q,{cache:'no-store'});
+    let r=await fetch(LIVE_CONFIG.url.replace(/\/$/,'')+'/g',{cache:'no-store'});
+    if(r.status===403&&LIVE_CONFIG.token){ r=await fetch(LIVE_CONFIG.url.replace(/\/$/,'')+'/g?t='+encodeURIComponent(LIVE_CONFIG.token),{cache:'no-store'}); }
     if(!r.ok){ el.innerHTML='<span class="err">connection problem ('+r.status+')</span>'; return; }
     const arr=await r.json();
-    if(Array.isArray(arr)){ arr.forEach(rec=>{ if(rec&&rec.game) live[rec.device||rec.game.id]=rec; });
+    if(Array.isArray(arr)){ arr.forEach(rec=>{ if(!rec||!rec.game) return;
+        const k=String(rec.game.id||rec.device||''); if(!k||k==='__proto__'||k==='constructor'||k==='prototype') return;
+        live[k]=rec; });
       el.textContent='last update '+new Date().toLocaleTimeString(); render(); }
   }catch(e){ el.innerHTML='<span class="err">offline — retrying…</span>'; }
 }

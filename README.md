@@ -115,32 +115,22 @@ icons/                         app icons
 
 MIT — see `LICENSE`.
 
-## Live sync (zero-config for the tablets)
+## Live sync — keeper links
 
-Live sync broadcasts each tablet's active game online after every play; any
-device opening the app sees a **Live now** card in the Tournament tab with live
-scores and situations. Logging never depends on the connection — offline plays
-stay local and are pushed when the network returns.
+Reads are public (scores are public data); **writes require a keeper key** that
+arrives via a magic link and then lives on the device. Spectators and viewer
+phones open the plain app URL and can never write.
 
-**The tablets need zero setup.** Whoever deploys the app configures it once:
-
-1. Deploy `worker.js` to Cloudflare (free): dash.cloudflare.com → Workers &
-   Pages → Create Worker → paste the file. Create a KV namespace and bind it to
-   the worker as `LIVE`. Optionally set a `TOKEN` variable (recommended).
-2. In `index.html`, fill in `LIVE_CONFIG` near the top with the worker URL and
-   the same token, commit, push.
-3. Done. Every device that opens the Pages URL now has live sync on
-   automatically (each generates its own identity and starts broadcasting when
-   it has a connection). It can be turned off per device in Options.
+Configure once:
+1. In the Cloudflare worker, set a variable **KEYS** with a JSON map of
+   key → device name, e.g.
+   `{"f1-7kq2m9x4":"field1","f2-3vp8n5t1":"field2","hub-9rw4c6z8":"hub"}`
+   (invent your own random keys). The old TOKEN variable can be deleted.
+2. Send each device its keeper link: `<app-URL>#k=<its-key>` — opened once,
+   the key is stored and the URL is cleaned. Options shows "Keeper link active".
+3. Each key can only write its own device namespace (enforced server-side), so
+   a leaked Field 1 key can never touch Field 2's games. Rotate a key by editing
+   KEYS and re-sending one link — **no app redeploy needed**.
 
 Without a `LIVE_CONFIG`, the app falls back to a manual JSONBin mode
 configurable in Options (API key + bin IDs per device).
-
-## Spectator page
-
-`live.html` is a public read-only live scoreboard: scores, game situation, and
-tap-to-expand player stats for every game currently being logged. Share
-`https://<your-username>.github.io/<repo-name>/live.html` with spectators (a QR
-code at the field works well). It polls every 30 s; the worker edge-caches the
-data so any number of spectators is fine. No install, no login, nothing to tamper
-with — it's read-only.
