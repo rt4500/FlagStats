@@ -312,7 +312,11 @@ async function poll(){
       el.textContent='last update '+new Date().toLocaleTimeString(); render(); }
   }catch(e){ el.innerHTML='<span class="err">offline — retrying…</span>'; }
 }
-poll(); setInterval(poll,30000);
+let pollTimer=null;
+function startPolling(){ if(pollTimer) return; poll(); pollTimer=setInterval(poll,30000); }
+function stopPolling(){ if(pollTimer){ clearInterval(pollTimer); pollTimer=null; } }
+document.addEventListener('visibilitychange',()=>{ document.visibilityState==='hidden'?stopPolling():startPolling(); });
+startPolling();
 </script>
 </body>
 </html>

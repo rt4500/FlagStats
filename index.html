@@ -247,7 +247,10 @@ function showModal(opts){
   const vals={};
   (opts.inputs||[]).forEach(inp=>{
     m.appendChild(h(`<div class="lbl" style="margin:8px 0 4px">${inp.label||''}</div>`));
-    const el=h(`<input value="${esc(inp.value||'')}" placeholder="${esc(inp.placeholder||'')}" ${inp.numeric?'inputmode="numeric"':''}>`);
+    const el=inp.textarea
+      ? h(`<textarea rows="8" placeholder="${esc(inp.placeholder||'')}" style="width:100%;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:10px;font:inherit"></textarea>`)
+      : h(`<input value="${esc(inp.value||'')}" placeholder="${esc(inp.placeholder||'')}" ${inp.numeric?'inputmode="numeric"':''}>`);
+    if(inp.textarea) el.value=inp.value||'';
     vals[inp.key]=inp.value||'';
     el.oninput=e=>{vals[inp.key]=e.target.value;};
     m.appendChild(el);
@@ -575,7 +578,7 @@ function renderGame(){
   root.innerHTML='';
   root.appendChild(h(`
    <div class="board">
-    ${(syncConfigured()&&g.plays.length)?`<div id="syncChip" style="text-align:right;font-size:10px;font-weight:800;letter-spacing:.05em;color:${(g._syncedPlays===g.plays.length)?'var(--green)':'var(--amber)'}">${(g._syncedPlays===g.plays.length)?'● LIVE':'● syncing…'}</div>`:''}
+    ${(syncConfigured()&&g.plays.length&&!g.practice)?`<div id="syncChip" style="text-align:right;font-size:10px;font-weight:800;letter-spacing:.05em;color:${(g._syncedPlays===g.plays.length)?'var(--green)':'var(--amber)'}">${(g._syncedPlays===g.plays.length)?'● LIVE':'● syncing…'}</div>`:''}
     <div class="scoreRow">
       <div class="teamBox ${posSide==='home'?'pos':''}">
         <div class="teamName">${posSide==='home'?'<span class="posDot"></span>':''}${esc(hn)}</div>
@@ -1353,6 +1356,14 @@ function renderSetup(){
   const root=document.getElementById('view-setup');
   root.innerHTML='';
 
+  // TOURNAMENT READINESS
+  const rc=h(`<div class="card"><h3>Tournament readiness</h3></div>`);
+  const rbar=h(`<div class="flexbtns"></div>`);
+  const chk=h(`<button class="btn sm blue">Device check</button>`); chk.onclick=deviceCheck;
+  const prc=h(`<button class="btn sm ghost">Create practice game</button>`); prc.onclick=createPracticeGame;
+  rbar.appendChild(chk); rbar.appendChild(prc); rc.appendChild(rbar);
+  root.appendChild(rc);
+
   // GAMES
   const gc=h(`<div class="card"><h3>Games on this device</h3></div>`);
   const schedBtn=h(`<button class="btn sm blue" style="margin-bottom:10px">Load Nations Cup schedule (21 group games)</button>`);
@@ -1381,7 +1392,7 @@ function renderSetup(){
     const expTag=g.plays.length ? (g.exportedPlays===g.plays.length?' · exported ✓':' · <span style="color:var(--amber)">not exported</span>') : '';
     const status=gst?`<b class="num">${gst.home}–${gst.away}</b> · ${g.plays.length} plays${expTag}`:'not played';
     const item=h(`<div class="gameItem ${g.id===activeId?'active':''}">
-      <div><div style="font-weight:800">${esc(g.teams.home.name)} vs ${esc(g.teams.away.name)}${g.finished?'<span class="finalBadge">FINAL</span>':''}</div>
+      <div><div style="font-weight:800">${esc(g.teams.home.name)} vs ${esc(g.teams.away.name)}${g.finished?'<span class="finalBadge">FINAL</span>':''}${g.practice?'<span class="finalBadge" style="background:var(--amber)">PRACTICE</span>':''}</div>
       <div class="meta" style="font-size:11px;color:var(--muted)">${esc(g.name||'')} · ${status}</div></div></div>`);
     const btns=h(`<div class="flexbtns"></div>`);
     const use=h(`<button class="btn sm ${g.id===activeId?'amber':'ghost'}">${g.id===activeId?'Active':'Open'}</button>`);
@@ -1389,6 +1400,8 @@ function renderSetup(){
     const ex=h(`<button class="btn sm ghost">Export</button>`); ex.onclick=()=>exportGame(g);
     const sh=h(`<button class="btn sm ghost">Share</button>`); sh.onclick=()=>shareGame(g);
     const del=h(`<button class="btn sm ghost">✕</button>`); del.onclick=()=>{
+      if(g.practice){ showModal({title:'Delete practice game?',body:'Nothing from it is kept or broadcast.',
+        buttons:[{label:'Delete',cls:'red',onTap:()=>doDeleteGame(g.id)},{label:'Cancel'}]}); return; }
       const played=g.plays.length>0;
       const unexported=played && g.exportedPlays!==g.plays.length;
       const gst2=played?deriveState(g.plays,g.settings):null;
@@ -1507,6 +1520,8 @@ function renderSetup(){
   seedBtn.onclick=()=>{ loadTestTeams(); toast('Nations Cup teams loaded'); render(); };
   const shareTeamsBtn=h(`<button class="btn sm ghost">Share rosters</button>`);
   shareTeamsBtn.onclick=shareTeams;
+  const pubBtn=h(`<button class="btn sm ghost">Publish (live)</button>`); pubBtn.onclick=publishRosters;
+  const pullBtn=h(`<button class="btn sm ghost">Fetch (live)</button>`); pullBtn.onclick=fetchRostersLive;
   const impBtn=h(`<button class="btn sm ghost">Import rosters…</button>`);
   const impInput=h(`<input type="file" accept=".json,application/json" style="display:none">`);
   impBtn.onclick=()=>impInput.click();
@@ -1517,7 +1532,7 @@ function renderSetup(){
         persist(); render(); toast(n+' team(s) imported (rosters replaced)');
       } else toast('Not a roster file');
     }catch(err){ toast('Bad roster file'); } };
-  tbar.appendChild(addBtn); tbar.appendChild(seedBtn); tbar.appendChild(shareTeamsBtn); tbar.appendChild(impBtn); tbar.appendChild(impInput);
+  tbar.appendChild(addBtn); tbar.appendChild(seedBtn); tbar.appendChild(shareTeamsBtn); tbar.appendChild(pubBtn); tbar.appendChild(pullBtn); tbar.appendChild(impBtn); tbar.appendChild(impInput);
   tc.appendChild(tbar);
   tc.appendChild(h(`<div class="help" style="margin-top:6px">Share rosters: enter the real squads on one tablet, share the file, import on the others — before creating/loading games, so the games pick up the right rosters.</div>`));
   root.appendChild(tc);
@@ -1535,6 +1550,20 @@ function buildTeamEditor(){
   const nameIn=h(`<input placeholder="Team name" value="${esc(cur.name)}" style="margin-bottom:10px">`);
   card.appendChild(nameIn);
   card.appendChild(h(`<div class="lbl" style="margin-bottom:6px">Roster</div>`));
+  const pasteBtn=h(`<button class="btn sm ghost" style="margin-bottom:8px">Paste roster from list…</button>`);
+  pasteBtn.onclick=()=>{
+    showModal({title:'Paste roster',body:'One player per line: <b>number name</b> (e.g. "12 Anna Meier"). Replaces the current roster.',
+      inputs:[{key:'txt',label:'Players',textarea:true,placeholder:'12 Anna Meier\n7 Lea Müller\n…'}],
+      buttons:[{label:'Apply',cls:'green',onTap:(v)=>{
+        const players=String(v.txt||'').split(/\n/).map(l=>l.trim()).filter(Boolean).map(l=>{
+          const m=l.match(/^#?(\d+)[\s.,-]+(.*)$/); if(m) return {id:uid(),num:m[1],name:m[2].trim()};
+          const m2=l.match(/^#?(\d+)$/); if(m2) return {id:uid(),num:m2[1],name:''};
+          return null; }).filter(Boolean);
+        if(!players.length){ toast('No valid lines found'); return; }
+        cur.players=players; render(); toast(players.length+' players'); }},
+        {label:'Cancel'}]});
+  };
+  card.appendChild(pasteBtn);
   const list=h(`<div id="rosterList"></div>`);
   let working=cur.players.map(p=>({...p}));
   function drawList(){
@@ -1626,7 +1655,7 @@ function renderTourney(){
     }catch(err){toast('Bad file: '+f.name);} }
     toast(n+' game(s) loaded'); render(); };
   const useLocal=h(`<button class="btn sm ghost">Add games from this device</button>`);
-  useLocal.onclick=()=>{ games.forEach(g=>{ if(!tourneyGames.some(x=>x.id===g.id)) tourneyGames.push(JSON.parse(JSON.stringify(g))); }); render(); };
+  useLocal.onclick=()=>{ games.forEach(g=>{ if(!g.practice&&!tourneyGames.some(x=>x.id===g.id)) tourneyGames.push(JSON.parse(JSON.stringify(g))); }); render(); };
   if(viewerConfigured()){
     const fromLive=h(`<button class="btn sm green">Load games from live server</button>`);
     fromLive.onclick=async()=>{ toast('Fetching from server…'); await fetchLive(true);
@@ -1653,6 +1682,18 @@ function renderTourney(){
     t+=`</tbody></table>`;
     sc.appendChild(h(t));
     sc.appendChild(h(`<div class="help" style="margin-top:6px">Win percentage (draws count half) · computed from loaded games only.</div>`));
+    if(standings.length>=7){
+      const finals=tourneyGames.filter(g=>g.finished).length;
+      const bb=h(`<button class="btn sm green" style="margin-top:8px">Create Sunday bracket (3 QFs) on this device</button>`);
+      bb.onclick=()=>{
+        const pairs=`QF2: <b>${esc(standings[3].team)}</b> vs <b>${esc(standings[4].team)}</b><br>QF3: <b>${esc(standings[1].team)}</b> vs <b>${esc(standings[6].team)}</b><br>QF4: <b>${esc(standings[2].team)}</b> vs <b>${esc(standings[5].team)}</b><br><br>1st seed <b>${esc(standings[0].team)}</b> has a bye into SF1.`;
+        showModal({title:'Create Sunday quarter-finals?',body:pairs,
+          warn:finals<21?('Only '+finals+' of 21 group games are final — seeding is provisional!'):null,
+          buttons:[{label:'Create 3 games',cls:'green',onTap:()=>{const n=createBracketQFs(standings); toast(n?n+' bracket games created':'Bracket games already exist'); render();}},{label:'Cancel'}]});
+      };
+      sc.appendChild(bb);
+      sc.appendChild(h(`<div class="help" style="margin-top:4px">Semis &amp; final: create after the QFs are played (teams depend on results).</div>`));
+    }
     root.appendChild(sc);
   }
 
@@ -1748,13 +1789,14 @@ function syncConfigured(){ return (autoMode()&&!!writeCred())||manualMode(); }
 function schedulePush(){
   if(!syncConfigured()) return;
   clearTimeout(syncTimer);
-  const throttle=autoMode()?15000:20000; // gentle on free tiers
-  const wait = (Date.now()-lastPush>throttle) ? 400 : (autoMode()?15000:8000);
+  const throttle=autoMode()?25000:20000; // gentle on the free-tier daily write quota
+  const wait = (Date.now()-lastPush>throttle) ? 400 : (autoMode()?25000:8000);
   updateSyncChip('pending');
   syncTimer=setTimeout(pushActive, wait);
 }
 async function pushActive(){
   const g=activeGame(); if(!g||!syncConfigured()) return;
+  if(g.practice) return; // practice games never broadcast
   if(!g.plays.length){ return; } // nothing to broadcast — keeps viewer devices silent
   lastPush=Date.now();
   try{
@@ -1823,8 +1865,15 @@ async function fetchLive(force){
   if(typeof curTab!=='undefined' && curTab==='tourney') render();
 }
 function startLivePolling(){ stopLivePolling();
-  if(viewerConfigured()){ fetchLive(); liveTimer=setInterval(fetchLive,20000); } }
+  if(viewerConfigured() && (typeof document==='undefined'||document.visibilityState!=='hidden')){
+    fetchLive(); liveTimer=setInterval(fetchLive,20000); } }
 function stopLivePolling(){ if(liveTimer){ clearInterval(liveTimer); liveTimer=null; } }
+if(typeof document!=='undefined'&&document.addEventListener){
+  document.addEventListener('visibilitychange',()=>{
+    if(document.visibilityState==='hidden') stopLivePolling();
+    else if(typeof curTab!=='undefined'&&curTab==='tourney') startLivePolling();
+  });
+}
 
 /* Roster sync: enter real squads once, share to the other tablets */
 async function shareTeams(){
@@ -1839,9 +1888,103 @@ async function shareTeams(){
   }catch(e){ if(e && e.name==='AbortError') return; }
   downloadBlob(json,fname,'application/json');
 }
+/* ---- DEVICE CHECK: one-tap tournament readiness ---- */
+async function deviceCheck(){
+  const rows=[]; const R=(state,label,detail)=>rows.push({state,label,detail:detail||''});
+  // relay reachable + key valid
+  if(LIVE_CONFIG.url){
+    try{
+      const r=await fetch(LIVE_CONFIG.url.replace(/\/$/,'')+'/g',{cache:'no-store'});
+      R(r.ok?'ok':'fail','Live relay reachable',r.ok?'':'HTTP '+r.status);
+    }catch(e){ R('fail','Live relay reachable','no connection'); }
+    if(writeKey){
+      try{
+        const r=await fetch(LIVE_CONFIG.url.replace(/\/$/,'')+'/ping?k='+encodeURIComponent(writeKey),{cache:'no-store'});
+        const j=await r.json();
+        R(j&&j.ok?'ok':'fail','Keeper key', j&&j.ok?('valid · role: '+j.role):'REJECTED — open the current keeper link again');
+      }catch(e){ R('warn','Keeper key','could not verify (offline?)'); }
+    } else R(LIVE_CONFIG.token?'warn':'warn','Keeper key', LIVE_CONFIG.token?'none — using legacy token':'none — viewer only (open a keeper link to broadcast)');
+  } else R('warn','Live sync','not configured');
+  // offline capability
+  try{
+    const reg=navigator.serviceWorker&&await navigator.serviceWorker.getRegistration();
+    const keys=(typeof caches!=='undefined')?await caches.keys():[];
+    const cached=keys.some(k=>k.startsWith('flag-stats'));
+    R(reg&&cached?'ok':(reg?'warn':'fail'),'Offline ready',reg?(cached?'app cached for offline use':'installed, cache still filling — reload once online'):'service worker missing — reload once online');
+  }catch(e){ R('warn','Offline ready','could not verify'); }
+  // schedule
+  const sched=games.filter(g=>/Fri 21\.8|Sat 22\.8/.test(g.name||'')).length;
+  R(sched>=21?'ok':(sched>0?'warn':'fail'),'Group schedule',sched+' of 21 fixtures on this device');
+  // rosters
+  const nations=['Switzerland','Ireland','Sweden','Ukraine','Poland','Czechia','Finland'];
+  const missing=nations.filter(n=>!teams[n]||!(teams[n].players||[]).length);
+  const counts=nations.filter(n=>teams[n]).map(n=>teamCodeName(n)+' '+(teams[n].players||[]).length).join(' · ');
+  R(missing.length?'fail':'ok','Team rosters',missing.length?('missing: '+missing.join(', ')):counts);
+  // field filter + clock (info)
+  R('ok','Field filter',(prefs.fieldFilter&&prefs.fieldFilter!=='all')?prefs.fieldFilter:'all games (hub)');
+  R(prefs.clock?'ok':'warn','Game clock',prefs.clock?('on · 2 × '+(prefs.halfMin||20)+' min'):'off');
+  const icon=st=>st==='ok'?'<span style="color:var(--green)">✓</span>':st==='warn'?'<span style="color:var(--amber)">!</span>':'<span style="color:var(--red)">✗</span>';
+  const html=rows.map(r=>`<div style="display:flex;gap:8px;margin:5px 0"><div style="width:14px">${icon(r.state)}</div><div><b>${esc(r.label)}</b>${r.detail?` — <span class="help" style="display:inline">${esc(r.detail)}</span>`:''}</div></div>`).join('');
+  showModal({title:'Device check',body:html,buttons:[{label:'Close'}]});
+}
+function teamCodeName(n){ return (typeof IOC_CODES!=='undefined'&&IOC_CODES[n])||n.slice(0,3).toUpperCase(); }
+
+/* ---- ROSTERS VIA RELAY: publish once, every device pulls ---- */
+async function publishRosters(){
+  if(!LIVE_CONFIG.url||!writeCred()){ toast('Needs a keeper link'); return; }
+  try{
+    const q=writeKey?('?k='+encodeURIComponent(writeKey)):('?t='+encodeURIComponent(LIVE_CONFIG.token));
+    const r=await fetch(LIVE_CONFIG.url.replace(/\/$/,'')+'/g/rosters'+q,{method:'PUT',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({type:'flagstats-teams',updated:Date.now(),teams})});
+    toast(r.ok?'Rosters published — other devices can now fetch them':'Publish failed ('+r.status+')');
+  }catch(e){ toast('Publish failed — offline?'); }
+}
+async function fetchRostersLive(){
+  if(!LIVE_CONFIG.url){ toast('Live sync not configured'); return; }
+  try{
+    const r=await fetch(LIVE_CONFIG.url.replace(/\/$/,'')+'/g',{cache:'no-store'});
+    const arr=await r.json();
+    const recs=(Array.isArray(arr)?arr:[]).filter(x=>x&&x.type==='flagstats-teams'&&x.teams).sort((a,b)=>(b.updated||0)-(a.updated||0));
+    if(!recs.length){ toast('No rosters published yet'); return; }
+    let n=0; for(const k in recs[0].teams){ if(unsafeKey(k)) continue; teams[k]=recs[0].teams[k]; n++; }
+    persist(); render(); toast(n+' team(s) fetched from live server');
+  }catch(e){ toast('Fetch failed — offline?'); }
+}
+
+/* ---- SUNDAY BRACKET: create the QFs from the standings ---- */
+function createBracketQFs(standings){
+  const clone=(n)=>({name:n,players:((teams[n]&&teams[n].players)||[]).map(p=>({...p}))});
+  const seed=(i)=>standings[i-1]&&standings[i-1].team;
+  const fixtures=[
+    ['Sun 23.8 09:00 · Field 1 · QF2',seed(4),seed(5)],
+    ['Sun 23.8 09:00 · Field 2 · QF3',seed(2),seed(7)],
+    ['Sun 23.8 10:15 · Field 1 · QF4',seed(3),seed(6)],
+  ];
+  let added=0;
+  fixtures.forEach(([label,hn,an])=>{
+    if(!hn||!an) return;
+    if(games.some(g=>g.name===label)) return;
+    games.push({id:uid(),name:label,date:Date.now(),settings:defaultSettings(),
+      teams:{home:clone(hn),away:clone(an)},plays:[]});
+    added++;
+  });
+  persist(); return added;
+}
+
+/* ---- PRACTICE MODE: rehearse without broadcasting or polluting anything ---- */
+function createPracticeGame(){
+  const demo=(nm,pre)=>({name:nm,players:Array.from({length:8},(_,i)=>({id:uid(),num:String(i+1),name:pre+' '+(i+1)}))});
+  const g={id:uid(),name:'PRACTICE — safe to experiment',date:Date.now(),practice:true,
+    settings:defaultSettings(),teams:{home:demo('Demo Blue','Blue'),away:demo('Demo Red','Red')},plays:[]};
+  games.unshift(g); activeId=g.id; persist();
+  if(typeof switchTab==='function') switchTab('live');
+  toast('Practice game — never broadcast, delete any time');
+}
+
 /* Whole-day bundle: every played game in one file (one file per tablet per day) */
 function exportBundle(){
-  const played=games.filter(g=>g.plays.length>0);
+  const played=games.filter(g=>g.plays.length>0&&!g.practice);
   if(!played.length){ toast('No played games to export'); return; }
   const bundle={type:'flagstats-bundle',exported:new Date().toISOString(),games:played};
   downloadBlob(JSON.stringify(bundle),'flagstats-bundle_'+new Date().toISOString().slice(0,10)+'.json','application/json');

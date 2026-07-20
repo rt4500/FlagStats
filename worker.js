@@ -15,6 +15,20 @@
       random string. Put the same string in LIVE_CONFIG.token in index.html.
    5. Deploy, copy the workers.dev URL into LIVE_CONFIG.url in index.html, push.
 */
+// In-memory cache (per warm isolate). The Cloudflare Cache API is a no-op on
+// workers.dev domains, so this is the cache that actually works there.
+let memCache = { t: 0, body: null };
+
+async function readIndex(env) {
+  const raw = await env.LIVE.get('idx');
+  if (raw) { try { return JSON.parse(raw); } catch {} }
+  // self-heal: rebuild the index once via list() if it's missing
+  const l = await env.LIVE.list({ prefix: 'g:', limit: 1000 });
+  const ids = l.keys.map((k) => k.name);
+  await env.LIVE.put('idx', JSON.stringify(ids));
+  return ids;
+}
+
 export default {
   async fetch(req, env, ctx) {
     const cors = {
@@ -25,6 +39,20 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { headers: cors });
 
     const url = new URL(req.url);
+
+    // Health/key check: GET /ping[?k=...] -> {ok, role} — no KV ops, stores nothing
+    if (url.pathname === '/ping') {
+      let keys = null;
+      try { keys = env.KEYS ? JSON.parse(env.KEYS) : null; } catch {}
+      const provided = url.searchParams.get('k') || url.searchParams.get('t') || '';
+      let role = null;
+      if (keys) role = keys[provided] || null;
+      else if (env.TOKEN) role = provided === env.TOKEN ? 'legacy' : null;
+      else role = 'open';
+      return new Response(JSON.stringify({ ok: !!role, role }),
+        { headers: { ...cors, 'Content-Type': 'application/json' } });
+    }
+
     const m = url.pathname.match(/^\/g(?:\/([\w-]{4,64}))?\/?$/);
     if (!m) return new Response('not found', { status: 404, headers: cors });
     const id = m[1];
@@ -56,10 +84,12 @@ export default {
       // new slots rejected past 200 (prevents storage-exhaustion abuse)
       const existing = await env.LIVE.get(storeKey);
       if (!existing) {
-        const l = await env.LIVE.list({ prefix: 'g:', limit: 201 });
-        if (l.keys.length >= 200) return new Response('storage full', { status: 429, headers: cors });
+        const ids = await readIndex(env);
+        if (ids.length >= 200) return new Response('storage full', { status: 429, headers: cors });
+        if (!ids.includes(storeKey)) { ids.push(storeKey); await env.LIVE.put('idx', JSON.stringify(ids)); }
       }
       await env.LIVE.put(storeKey, body, { expirationTtl: 60 * 60 * 24 * 7 });
+      memCache = { t: 0, body: null }; // fresh data invalidates the cache
       return new Response('ok', { headers: cors });
     }
     if (req.method === 'GET' && id) {
@@ -67,21 +97,23 @@ export default {
       return new Response(v || 'null', { headers: { ...cors, 'Content-Type': 'application/json' } });
     }
     if (req.method === 'GET') {
-      // Edge-cache the list for 10 s so many spectators cost ~1 KV read burst per 10 s.
-      const cache = caches.default;
-      const hit = await cache.match(req);
-      if (hit) return hit;
-      const list = await env.LIVE.list({ prefix: 'g:' });
-      const out = [];
-      for (const k of list.keys) {
-        const v = await env.LIVE.get(k.name);
-        if (v) { try { out.push(JSON.parse(v)); } catch {} }
+      // 10 s in-memory cache: repeated polls in a warm isolate cost zero KV ops.
+      // (The Cache API is a no-op on workers.dev, so this replaces it.)
+      if (memCache.body && Date.now() - memCache.t < 10000) {
+        return new Response(memCache.body, { headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=5' } });
       }
-      const resp = new Response(JSON.stringify(out), {
-        headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, s-maxage=10, max-age=5' },
-      });
-      ctx.waitUntil(cache.put(req, resp.clone()));
-      return resp;
+      const ids = await readIndex(env);      // 1 KV read — no list operation
+      const out = []; const dead = [];
+      for (const key of ids) {
+        const v = await env.LIVE.get(key);
+        if (v) { try { out.push(JSON.parse(v)); } catch {} }
+        else dead.push(key);                  // slot expired (7-day TTL)
+      }
+      if (dead.length) { const alive = ids.filter((k) => !dead.includes(k));
+        ctx.waitUntil(env.LIVE.put('idx', JSON.stringify(alive))); }
+      const body = JSON.stringify(out);
+      memCache = { t: Date.now(), body };
+      return new Response(body, { headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=5' } });
     }
     return new Response('bad request', { status: 400, headers: cors });
   },

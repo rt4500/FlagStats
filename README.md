@@ -134,3 +134,17 @@ Configure once:
 
 Without a `LIVE_CONFIG`, the app falls back to a manual JSONBin mode
 configurable in Options (API key + bin IDs per device).
+
+## Automation
+
+- **Device check** (Teams & Games → Tournament readiness): one tap verifies relay,
+  keeper key, offline cache, schedule, rosters, field filter and clock.
+- **Practice game**: rehearse logging; never broadcast, excluded from bundles and
+  standings, one-tap delete.
+- **Rosters via relay**: enter squads once → Publish (live) → Fetch (live) on the
+  other devices. Paste-import accepts "12 Anna Meier" lines.
+- **Sunday bracket**: Tournament tab → button under the standings creates the three
+  QFs with correct seeds and field labels.
+- **Worker auto-deploy**: fill in `wrangler.toml` (KV id) and add the two GitHub
+  secrets described there — every push touching `worker.js` then deploys it.
+- **Keeper-link QR sheet**: `python3 make_keeper_qr.py <app-url> <key1> <key2> <key3>`
