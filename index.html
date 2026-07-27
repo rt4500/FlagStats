@@ -1113,6 +1113,7 @@ function defenderRow(g,defSide){
   wrap.appendChild(playerPicker(rosterOf(g,defSide),ui.pending.flagPullBy,pid=>{ui.pending.flagPullBy=pid;commit();}));
   return wrap;
 }
+const APP_VERSION='v33';
 const IOC_CODES={'Switzerland':'SUI','Ireland':'IRL','Sweden':'SWE','Ukraine':'UKR','Poland':'POL','Czechia':'CZE','Finland':'FIN','Germany':'GER','Austria':'AUT','France':'FRA','Italy':'ITA','Great Britain':'GBR'};
 /* Flag color stripes per nation — lets a spotter recognize the end zone by color,
    not just by reading the label. Ordered top-to-bottom as on the real flag. */
@@ -1912,23 +1913,28 @@ function renderTourney(){
     t+=`</tbody></table>`; card2.appendChild(h(t));
   };
   const lc=h(`<div class="card"><h3>Leaders</h3></div>`);
-  if(!all.length){ lc.appendChild(h(`<div class="help">The loaded games contain no player attributions yet (only scores/quick entries). Player stats appear here once plays are logged with players.</div>`)); }
-  leader(lc,'Passing yards',l=>l.passYds,l=>l.passYds);
-  leader(lc,'Passing TD',l=>l.passTD,l=>l.passTD);
-  leader(lc,'Receiving yards',l=>l.recYds,l=>l.recYds+' ('+l.rec+' rec)');
-  leader(lc,'Rushing yards',l=>l.rushYds,l=>l.rushYds);
-  leader(lc,'Total TD',l=>l.passTD+l.recTD+l.rushTD+l.intRetTD,l=>l.passTD+l.recTD+l.rushTD+l.intRetTD);
-  leader(lc,'Conversion points',l=>l.convPts,l=>l.convPts);
-  leader(lc,'Flag pulls',l=>l.flags,l=>l.flags);
-  leader(lc,'Sacks',l=>l.sacks,l=>l.sacks);
-  leader(lc,'Interceptions (def)',l=>l.defint,l=>l.defint+(l.intRetTD?` (${l.intRetTD} TD)`:''));
-  leader(lc,'Pass breakups',l=>l.pbu,l=>l.pbu);
+  if(!all.length){ lc.appendChild(h(`<div class="help">No player stats yet. Plays must be logged with players attached (a run or pass saved without tapping a player credits no one).</div>`)); }
+  let shown=0;
+  const leaderC=(card2,title,fn,fmt)=>{ const before=card2.childNodes.length; leader(card2,title,fn,fmt); if(card2.childNodes.length>before) shown++; };
+  leaderC(lc,'Passing yards',l=>l.passYds,l=>l.passYds);
+  leaderC(lc,'Passing TD',l=>l.passTD,l=>l.passTD);
+  leaderC(lc,'Receiving yards',l=>l.recYds,l=>l.recYds+' ('+l.rec+' rec)');
+  leaderC(lc,'Rushing yards',l=>l.rushYds,l=>l.rushYds);
+  leaderC(lc,'Total TD',l=>l.passTD+l.recTD+l.rushTD+l.intRetTD,l=>l.passTD+l.recTD+l.rushTD+l.intRetTD);
+  leaderC(lc,'Conversion points',l=>l.convPts,l=>l.convPts);
+  leaderC(lc,'Flag pulls',l=>l.flags,l=>l.flags);
+  leaderC(lc,'Sacks',l=>l.sacks,l=>l.sacks);
+  leaderC(lc,'Interceptions (def)',l=>l.defint,l=>l.defint+(l.intRetTD?` (${l.intRetTD} TD)`:''));
+  leaderC(lc,'Pass breakups',l=>l.pbu,l=>l.pbu);
+  if(all.length && !shown){ lc.appendChild(h(`<div class="help">${all.length} players found but no positive stats — check the play log has players attached to completions/runs.</div>`)); }
   root.appendChild(lc);
 
   const exp=h(`<div class="card"><h3>Export</h3></div>`);
   const csvBtn=h(`<button class="btn sm blue">Download full stats (CSV)</button>`);
   csvBtn.onclick=()=>downloadTourneyCSV(all);
-  exp.appendChild(csvBtn); root.appendChild(exp);
+  exp.appendChild(csvBtn);
+  exp.appendChild(h(`<div class="help" style="margin-top:8px">App ${APP_VERSION} · ${all.length} players in leaders · ${tourneyGames.length} game(s)</div>`));
+  root.appendChild(exp);
 }
 function downloadTourneyCSV(all){
   const cols=['team','num','name','att','comp','passYds','passTD','int','tgt','rec','recYds','recTD','drops','rushAtt','rushYds','rushTD','flags','tfl','sacks','pbu','defint','intRetYds','intRetTD','convThrow','convMade','convPts'];
