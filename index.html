@@ -1820,8 +1820,14 @@ function renderTourney(){
     lc0.appendChild(rf);
     root.appendChild(lc0);
   }
+  // Auto-include this device's own played (non-practice) games so standings/leaders
+  // work with zero taps. Deduped by id, so importing or live-loading won't double them.
+  let autoAdded=0;
+  games.forEach(g=>{ if(!g.practice && g.plays && g.plays.length && !tourneyGames.some(x=>x.id===g.id)){
+    tourneyGames.push(JSON.parse(JSON.stringify(g))); autoAdded++; } });
+
   const card=h(`<div class="card"><h3>Tournament roll-up</h3>
-    <div class="help">Load the exported JSON from every game (each device / each match). Player stats are combined by team + jersey number across all loaded games.</div></div>`);
+    <div class="help">Your own games on this device are included automatically. Add exported JSON from other devices to combine the whole tournament. Player stats are combined by team + jersey number.</div></div>`);
   const imp=h(`<div class="flexbtns" style="margin-top:12px"></div>`);
   const fileBtn=h(`<button class="btn sm blue">Load game files…</button>`);
   const input=h(`<input type="file" accept=".json,application/json" multiple style="display:none">`);
@@ -1844,10 +1850,11 @@ function renderTourney(){
       toast(n+' game(s) loaded from server'); render(); };
     imp.appendChild(fromLive);
   }
-  const clr=h(`<button class="btn sm ghost">Clear</button>`); clr.onclick=()=>{tourneyGames=[];render();};
+  const clr=h(`<button class="btn sm ghost">Clear imported</button>`);
+  clr.onclick=()=>{ const localIds=new Set(games.map(g=>g.id)); tourneyGames=tourneyGames.filter(g=>localIds.has(g.id)); render(); };
   imp.appendChild(fileBtn);imp.appendChild(useLocal);imp.appendChild(clr);imp.appendChild(input);
   card.appendChild(imp);
-  card.appendChild(h(`<div class="help" style="margin-top:8px">${tourneyGames.length} game(s) loaded.</div>`));
+  card.appendChild(h(`<div class="help" style="margin-top:8px">${tourneyGames.length} game(s) in the roll-up${autoAdded?` (${autoAdded} from this device)`:''}.</div>`));
   root.appendChild(card);
 
   if(!tourneyGames.length) return;
