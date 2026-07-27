@@ -1827,18 +1827,24 @@ function renderTourney(){
     tourneyGames.push(JSON.parse(JSON.stringify(g))); autoAdded++; } });
 
   const card=h(`<div class="card"><h3>Tournament roll-up</h3>
-    <div class="help">Your own games on this device are included automatically. Add exported JSON from other devices to combine the whole tournament. Player stats are combined by team + jersey number.</div></div>`);
+    <div class="help">Your own games on this device are included automatically. Use the buttons below only to add the <b>other</b> field's games (exported JSON or the live server). Player stats combine by team + jersey number.</div></div>`);
   const imp=h(`<div class="flexbtns" style="margin-top:12px"></div>`);
   const fileBtn=h(`<button class="btn sm blue">Load game files…</button>`);
   const input=h(`<input type="file" accept=".json,application/json" multiple style="display:none">`);
   fileBtn.onclick=()=>input.click();
-  input.onchange=async(e)=>{ let n=0;
-    const addG=(g)=>{ if(g&&g.teams&&g.plays&&!tourneyGames.some(x=>x.id&&x.id===g.id)){ tourneyGames.push(g); n++; } };
+  input.onchange=async(e)=>{ let n=0, dup=0, bad=0;
+    const addG=(g)=>{ if(!g||!g.teams||!g.plays){ bad++; return; }
+      if(tourneyGames.some(x=>x.id&&x.id===g.id)){ dup++; return; }
+      tourneyGames.push(g); n++; };
     for(const f of e.target.files){ try{ const obj=JSON.parse(await f.text());
       if(obj&&obj.type==='flagstats-bundle'&&Array.isArray(obj.games)) obj.games.forEach(addG);
       else addG(obj);
-    }catch(err){toast('Bad file: '+f.name);} }
-    toast(n+' game(s) loaded'); render(); };
+    }catch(err){ bad++; toast('Bad file: '+f.name); } }
+    const parts=[];
+    if(n) parts.push(n+' loaded');
+    if(dup) parts.push(dup+' already in roll-up');
+    if(bad) parts.push(bad+' unreadable');
+    toast(parts.length?parts.join(' · '):'Nothing to load'); render(); };
   const useLocal=h(`<button class="btn sm ghost">Add games from this device</button>`);
   useLocal.onclick=()=>{ games.forEach(g=>{ if(!g.practice&&!tourneyGames.some(x=>x.id===g.id)) tourneyGames.push(JSON.parse(JSON.stringify(g))); }); render(); };
   if(viewerConfigured()){
