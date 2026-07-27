@@ -185,6 +185,7 @@
   td:first-child,th:first-child{text-align:left}
   td.num{font-family:var(--mono)}
   .miniTag{display:inline-block;font-size:10px;color:var(--muted);margin-left:6px}
+  .leaderBlock{margin-bottom:4px}
 
   /* Setup */
   .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:12px}
@@ -1113,7 +1114,7 @@ function defenderRow(g,defSide){
   wrap.appendChild(playerPicker(rosterOf(g,defSide),ui.pending.flagPullBy,pid=>{ui.pending.flagPullBy=pid;commit();}));
   return wrap;
 }
-const APP_VERSION='v33';
+const APP_VERSION='v34';
 const IOC_CODES={'Switzerland':'SUI','Ireland':'IRL','Sweden':'SWE','Ukraine':'UKR','Poland':'POL','Czechia':'CZE','Finland':'FIN','Germany':'GER','Austria':'AUT','France':'FRA','Italy':'ITA','Great Britain':'GBR'};
 /* Flag color stripes per nation — lets a spotter recognize the end zone by color,
    not just by reading the label. Ordered top-to-bottom as on the real flag. */
@@ -1908,9 +1909,9 @@ function renderTourney(){
   const leader=(card2,title,fn,fmt)=>{
     const sorted=all.filter(a=>fn(a.line)>0).sort((a,b)=>fn(b.line)-fn(a.line)).slice(0,8);
     if(!sorted.length) return;
-    let t=`<div class="bsTeam">${title}</div><table><tbody>`;
+    let t=`<div class="leaderBlock"><div class="bsTeam">${title}</div><table><tbody>`;
     sorted.forEach(a=>{ t+=`<tr><td>#${esc(a.num)} ${esc(a.name)} <span class="miniTag">${esc(a.team)}</span></td><td class="num">${fmt(a.line)}</td></tr>`; });
-    t+=`</tbody></table>`; card2.appendChild(h(t));
+    t+=`</tbody></table></div>`; card2.appendChild(h(t));
   };
   const lc=h(`<div class="card"><h3>Leaders</h3></div>`);
   if(!all.length){ lc.appendChild(h(`<div class="help">No player stats yet. Plays must be logged with players attached (a run or pass saved without tapping a player credits no one).</div>`)); }
