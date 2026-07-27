@@ -72,9 +72,12 @@
   .field{position:relative;flex:0 0 clamp(100px,32vw,164px);height:clamp(360px,58vh,600px);background:
     repeating-linear-gradient(0deg,var(--green-d) 0 8px,#125a37 8px 16px);
     border:1px solid var(--line);border-radius:12px;overflow:hidden;touch-action:none;cursor:crosshair}
-  .ez{position:absolute;left:0;right:0;height:9%;background:rgba(0,0,0,.32);display:flex;align-items:center;justify-content:center}
+  .ez{position:absolute;left:0;right:0;height:9%;display:flex;align-items:center;justify-content:center;overflow:hidden}
   .ez.top{top:0}.ez.bot{bottom:0}
-  .ez span{font-size:8px;letter-spacing:.1em;color:#cfe9d9;font-weight:800;transform:rotate(0)}
+  .ezFlag{position:absolute;inset:0;display:flex;flex-direction:column;opacity:.85}
+  .ezFlag span{display:block}
+  .ezLabel{position:relative;z-index:2;font-size:11px;letter-spacing:.12em;font-weight:800;
+    color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.9),0 0 3px rgba(0,0,0,.7);padding:1px 6px}
   .ytick{position:absolute;left:0;right:0;height:0;border-top:1px solid rgba(255,255,255,.18)}
   .ytick.mid{border-top:2px dashed rgba(242,177,56,.8)}
   .ynum{position:absolute;left:3px;font-size:8px;color:rgba(255,255,255,.55);font-family:var(--mono);transform:translateY(-50%)}
@@ -714,16 +717,32 @@ function ballText(g,spot,posSide){ return posLabel(g,spot,posSide); }
 function buildField(g,st,posSide){
   const S=g.settings, L=S.fieldLength;
   const f=h(`<div class="field" id="fieldEl"></div>`);
-  // end zones — labelled for whoever is attacking upward right now
-  const atkSide = (ui.step==='int_spot') ? (posSide==='home'?'away':'home') : posSide;
-  const defSideEz = atkSide==='home'?'away':'home';
-  f.appendChild(h(`<div class="ez top"><span>${esc(g.teams[defSideEz].name.toUpperCase())}</span></div>`));
-  f.appendChild(h(`<div class="ez bot"><span>${esc(g.teams[atkSide].name.toUpperCase())}</span></div>`));
+  // FIXED FIELD (default): home team's goal is always at the BOTTOM, away's at the TOP,
+  // for the whole game — the ground never rotates under the spotter. When following
+  // possession is enabled instead, the attacking team always drives upward (old behavior).
+  const fixed = prefs.fieldFollowsPossession!==true;
+  // which side "owns" the bottom end zone on screen
+  const bottomSide = fixed ? 'home' : (ui.step==='int_spot' ? (posSide==='home'?'away':'home') : posSide);
+  const topSide = bottomSide==='home'?'away':'home';
+  // convert a possession-frame yard (0=own goal .. L=attacking goal) to a screen fraction
+  // 0 (bottom) .. 1 (top), honoring who currently holds the ball
+  const owner = (ui.step==='int_spot') ? (posSide==='home'?'away':'home') : posSide; // who the spot's frame belongs to
+  function toScreenFrac(yard){
+    // yard is in `owner`'s frame. If owner defends the bottom, higher yard = up.
+    // If owner defends the top, higher yard = down (mirror).
+    const ownerAtBottom = (owner===bottomSide);
+    return ownerAtBottom ? (yard/L) : (1 - yard/L);
+  }
+  function fracToYard(frac){ // inverse, back into owner's frame
+    const ownerAtBottom = (owner===bottomSide);
+    const y = ownerAtBottom ? frac*L : (1-frac)*L;
+    return Math.max(0,Math.min(L,Math.round(y)));
+  }
+  buildFieldEndzones(g,f,topSide,bottomSide);
   // playing area between 9% and 91%
   const top=9, bot=91, span=bot-top;
-  const yToPct=(yard)=>{ // yard 0=own goal(bottom) .. L=opp goal(top)
-    return bot - (yard/L)*span; };
-  // ticks every 5 yards + midfield
+  const yToPct=(yard)=> bot - toScreenFrac(yard)*span;
+  // ticks every 5 yards + midfield (numbers shown in the ball-carrier's frame)
   for(let y=5;y<L;y+=5){
     const pct=yToPct(y);
     const tick=h(`<div class="ytick ${y===S.midfield?'mid':''}"></div>`);
@@ -766,7 +785,8 @@ function buildField(g,st,posSide){
   }
   const yardFrom=(clientY)=>{ const rect=f.getBoundingClientRect();
     const pctY=((clientY-rect.top)/rect.height)*100;
-    let yard=((bot-pctY)/span)*L; return Math.max(0,Math.min(L,Math.round(yard))); };
+    const frac=(bot-pctY)/span; // 0 bottom .. 1 top
+    return fracToYard(frac); };
   let dragging=false;
   const active=()=> (isSpotStep()||isAdjust()) && inputMode==='field';
   const paint=(yard)=>{ if(isAdjust()){ ui.adjust.spot=yard; showAdjust(yard); } else showAt(yard); };
@@ -1094,6 +1114,30 @@ function defenderRow(g,defSide){
   return wrap;
 }
 const IOC_CODES={'Switzerland':'SUI','Ireland':'IRL','Sweden':'SWE','Ukraine':'UKR','Poland':'POL','Czechia':'CZE','Finland':'FIN','Germany':'GER','Austria':'AUT','France':'FRA','Italy':'ITA','Great Britain':'GBR'};
+/* Flag color stripes per nation — lets a spotter recognize the end zone by color,
+   not just by reading the label. Ordered top-to-bottom as on the real flag. */
+const FLAG_COLORS={
+  'Switzerland':['#D52B1E','#FFFFFF'], 'Ireland':['#169B62','#FFFFFF','#FF883E'],
+  'Sweden':['#006AA7','#FECC00'], 'Ukraine':['#0057B7','#FFD700'],
+  'Poland':['#FFFFFF','#DC143C'], 'Czechia':['#11457E','#D7141A','#FFFFFF'],
+  'Finland':['#FFFFFF','#003580'], 'Germany':['#000000','#DD0000','#FFCE00'],
+  'Austria':['#ED2939','#FFFFFF'], 'France':['#0055A4','#FFFFFF','#EF4135'],
+  'Italy':['#009246','#FFFFFF','#CE2B37'], 'Great Britain':['#012169','#FFFFFF','#C8102E'] };
+function flagColors(name){ return FLAG_COLORS[name]||['#3a4550','#2a333d']; }
+function buildFieldEndzones(g,f,topSide,bottomSide){
+  const mk=(side,pos)=>{
+    const name=g.teams[side].name;
+    const cols=flagColors(name);
+    const stripes=cols.map(c=>`<span style="flex:1;background:${c}"></span>`).join('');
+    const code=teamCode(g,side);
+    return `<div class="ez ${pos}">
+      <div class="ezFlag">${stripes}</div>
+      <span class="ezLabel">${esc(code)}</span>
+    </div>`;
+  };
+  f.appendChild(h(mk(topSide,'top')));
+  f.appendChild(h(mk(bottomSide,'bot')));
+}
 function teamCode(g,side){ const n=g.teams[side].name; return IOC_CODES[n]||n.slice(0,3).toUpperCase(); }
 function posLabel(g,yard,off){ const L=g.settings.fieldLength, mid=g.settings.midfield;
   if(!off){ // fallback without team context
@@ -1572,7 +1616,14 @@ function renderSetup(){
   hctl.appendChild(hminus);hctl.appendChild(hval);hctl.appendChild(hplus);
   hrow.appendChild(hctl); oc.appendChild(hrow);
   oc.appendChild(optRow('bigui','Larger buttons','Bigger tap targets for cold hands / gloves'));
-  // Light/dark theme
+  // Field orientation
+  {
+    const follows=prefs.fieldFollowsPossession===true;
+    const row=h(`<div class="teamRow"><div><div style="font-weight:800">Field follows possession</div><div class="meta">${follows?'Attacking team always drives up (field flips on turnover)':'Fixed: home stays bottom, away stays top all game (recommended)'}</div></div></div>`);
+    const b=h(`<button class="btn sm ${follows?'amber':'ghost'}">${follows?'On':'Off'}</button>`);
+    b.onclick=()=>{ prefs.fieldFollowsPossession=!follows; store.save('fs_prefs',prefs); render(); };
+    row.appendChild(b); oc.appendChild(row);
+  }
   {
     const light=prefs.theme==='light';
     const row=h(`<div class="teamRow"><div><div style="font-weight:800">Light theme</div><div class="meta">Better in bright daylight / outdoors</div></div></div>`);
