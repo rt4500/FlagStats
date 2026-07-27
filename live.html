@@ -12,6 +12,10 @@
     --muted:#8A95A3;--green:#1FA35F;--amber:#F2B138;--red:#E5484D;
     --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
     --sans:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}
+  :root[data-theme="light"]{--bg:#EEF1F5;--panel:#FFFFFF;--panel2:#F4F6F9;--line:#C6CDD6;
+    --ink:#131720;--muted:#5A646F;--green:#16794A;--amber:#B5730A;--red:#C42B30}
+  .themeBtn{position:fixed;top:10px;right:10px;z-index:50;background:var(--panel2);color:var(--muted);
+    border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:12px;cursor:pointer}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans)}
   #app{max-width:560px;margin:0 auto;padding:16px}
@@ -40,12 +44,13 @@
 </style>
 </head>
 <body>
+<button class="themeBtn" id="themeBtn" onclick="toggleTheme()">☀ Light</button>
 <div id="app">
   <h1>Nations Cup Prague 2026</h1>
   <div class="sub">Women's Flag Football · live scores &amp; stats · updates automatically</div>
   <div id="games"><div class="empty">Waiting for live games…</div></div>
   <div id="tables"></div>
-  <div class="status" id="status"></div>
+  <div class="status" id="status" style="cursor:pointer" title="Tap to refresh" onclick="poll()"></div>
 </div>
 <script>
 const LIVE_CONFIG={
@@ -164,6 +169,17 @@ function posLabel(g,yard,off){ const L=g.settings.fieldLength, mid=g.settings.mi
 function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
 let live={}, expand={};
+function applyTheme(light){
+  document.documentElement.setAttribute('data-theme', light?'light':'dark');
+  const mc=document.querySelector('meta[name="theme-color"]'); if(mc) mc.setAttribute('content', light?'#EEF1F5':'#14171C');
+  const b=document.getElementById('themeBtn'); if(b) b.textContent=light?'🌙 Dark':'☀ Light';
+}
+function toggleTheme(){
+  const light=document.documentElement.getAttribute('data-theme')!=='light';
+  try{ localStorage.setItem('fs_live_theme', light?'light':'dark'); }catch(e){}
+  applyTheme(light);
+}
+try{ applyTheme(localStorage.getItem('fs_live_theme')==='light'); }catch(e){ applyTheme(false); }
 function fmt(g){
   const st=deriveState(g.plays,g.settings);
   return {st};
@@ -206,7 +222,7 @@ function render(){
     const ago=Math.max(0,Math.round((Date.now()-rec.updated)/1000));
     const situ=g.finished?'Final':(st.awaitingPAT?'Point after':(g.teams[st.possession].name+' ball · '+
       st.down+['st','nd','rd','th'][Math.min(st.down,4)-1]+' · '+posLabel(g,st.spot,st.possession)));
-    const half=(g.clock&&g.clock.half)?(' · H'+g.clock.half):'';
+    const half=(g.clock&&(+g.clock.half))?(' · H'+Math.max(1,Math.min(9,+g.clock.half))):'';
     const card=document.createElement('div'); card.className='card';
     card.innerHTML='<div class="score">'+
       '<div><div class="tn">'+esc(g.teams.home.name)+'</div><div class="sc">'+st.home+'</div></div>'+

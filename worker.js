@@ -86,6 +86,9 @@ export default {
       if (!existing) {
         const ids = await readIndex(env);
         if (ids.length >= 200) return new Response('storage full', { status: 429, headers: cors });
+        // per-device cap: one leaked key can fill only its own namespace, never the whole store
+        if (ns && ids.filter((k) => k.startsWith('g:' + ns)).length >= 60)
+          return new Response('device storage full', { status: 429, headers: cors });
         if (!ids.includes(storeKey)) { ids.push(storeKey); await env.LIVE.put('idx', JSON.stringify(ids)); }
       }
       await env.LIVE.put(storeKey, body, { expirationTtl: 60 * 60 * 24 * 7 });
