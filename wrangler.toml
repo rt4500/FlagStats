@@ -13,4 +13,4 @@ compatibility_date = "2026-01-01"
 keep_vars = true   # NEVER overwrite KEYS/TOKEN set in the dashboard
 [[kv_namespaces]]
 binding = "LIVE"
-id = "d641770f092b49de9f91edcaf7fecd95"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"

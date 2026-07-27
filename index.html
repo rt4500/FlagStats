@@ -109,6 +109,22 @@
   .modal .mt2{font-weight:800;font-size:15px;margin-bottom:8px}
   .modal .warn{color:var(--red);font-weight:700;font-size:12px;margin:6px 0}
   .finalBadge{display:inline-block;background:var(--green);color:#fff;font-size:10px;font-weight:800;letter-spacing:.06em;padding:2px 7px;border-radius:6px;margin-left:6px;vertical-align:middle}
+  /* Live now (Tournament tab) */
+  .liveCard{border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px;background:var(--panel2);cursor:pointer;transition:border-color .15s}
+  .liveCard:active{border-color:var(--amber)}
+  .liveTop{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:2px}
+  .liveFieldChip{font-size:9px;font-weight:800;letter-spacing:.06em;padding:2px 7px;border-radius:6px;background:var(--panel3);color:var(--muted)}
+  .liveFieldChip.f1{background:rgba(94,158,255,.18);color:#8fbaff}
+  .liveFieldChip.f2{background:rgba(242,177,56,.18);color:var(--amber)}
+  .liveDotSm{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--red);margin-right:5px;animation:liveblink 1.4s infinite}
+  @keyframes liveblink{50%{opacity:.3}}
+  .liveScoreRow{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:6px;margin:4px 0}
+  .liveTeamName{font-size:12.5px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .liveTeamName.poss{color:var(--amber)}
+  .liveScoreNum{font-family:var(--mono);font-size:24px;font-weight:800;text-align:center;min-width:26px}
+  .liveVs{color:var(--muted2);font-size:10px;text-align:center}
+  .liveMetaRow{display:flex;justify-content:space-between;align-items:center;font-size:10.5px;color:var(--muted);margin-top:4px}
+  .liveMetaRow .tapHint{color:var(--muted2)}
   .readout .rv{font-family:var(--mono);font-weight:800;font-size:24px;line-height:1.1;margin-top:2px}
   .readout .rg{font-family:var(--mono);font-size:13px;color:var(--amber);font-weight:700;margin-top:2px}
   .promptSub{font-size:11px;color:var(--muted);margin-top:2px}
@@ -926,6 +942,11 @@ function buildPanel(g,st){
       break;
     }
     case 'pass_out':{
+      if(!ui.pending.passer){ // first pass for this team: ask who threw it
+        setPrompt('Who threw the pass?','Remembered for the next passes');
+        wrap.appendChild(playerPicker(off,null,pid=>{ui.pending.passer=pid;render();},true));
+        break;
+      }
       setPrompt('Pass result','Passer: '+playerName(g,posSide,ui.pending.passer));
       const gr=grid('c3');
       gr.appendChild(B('Complete','green big',()=>{ui.pending.complete=true;ui.step='pass_rec';render();}));
@@ -1012,9 +1033,9 @@ function buildPanel(g,st){
   }
   return wrap;
 }
-function defaultQB(g,side){ // last passer used, else first player
+function defaultQB(g,side){ // last passer used for this team, else null (ask!)
   for(let i=g.plays.length-1;i>=0;i--){ const p=g.plays[i]; if(p.type==='pass'&&p.offense===side&&p.passer) return p.passer; }
-  const r=rosterOf(g,side); return r.length?r[0].id:null;
+  return null;
 }
 function startPending(g){ ui.pending=newPending(g); ui._passerOpen=false; }
 function playerPicker(list,selId,onPick,noAdd){
@@ -1158,7 +1179,7 @@ function buildPlayLog(g){
     const d=describePlay(g,p,pre);
     const it=h(`<div class="plogItem ${d.scoring?'scoring':''}">
       <div class="pi"><div class="situ2">${esc(d.situ)}</div><div class="desc">${esc(d.desc)}</div></div></div>`);
-    const canEdit=['pass','run','sack'].includes(p.type);
+    const canEdit=['pass','run','sack','pat','penalty'].includes(p.type);
     if(canEdit){ const ed=h(`<button class="x2">✎</button>`); ed.onclick=()=>{ui.editIdx=i;render();}; it.appendChild(ed); }
     const del=h(`<button class="x2">✕</button>`); del.onclick=()=>{
       showModal({title:'Delete this play?',body:esc(d.desc),warn:'Score, downs and stats after it are recalculated.',
@@ -1180,10 +1201,67 @@ function buildPlayEditor(g,p,idx,pre){
   if(p.type==='pass'){ pick('Passer',off,'passer');
     if(p.interception){ pick('Intercepted by',def,'interceptedBy'); }
     else if(p.complete){ pick('Receiver',off,'receiver'); if(!p.touchdown) pick('Flag pull',def,'flagPullBy'); }
-    else { pick('Target',off,'receiver'); }
+    else {
+      pick('Target',off,'receiver');
+      box.appendChild(h(`<div class="lbl" style="margin:8px 0 4px">Incomplete reason</div>`));
+      const rr=h(`<div class="btnGrid c4" style="margin-bottom:6px"></div>`);
+      [['drop','Drop'],['defended','Defended'],['overthrow','Overthrow'],[null,'None']].forEach(([v,l])=>{
+        const b=h(`<button class="btn sm ${p.incompleteReason===v?'amber':'ghost'}">${l}</button>`);
+        b.onclick=()=>{p.incompleteReason=v;persist();render();}; rr.appendChild(b); });
+      box.appendChild(rr);
+    }
   }
   if(p.type==='run'){ pick('Ball carrier',off,'rusher'); if(!p.touchdown) pick('Flag pull',def,'flagPullBy'); }
   if(p.type==='sack'){ pick('Sack by',def,'sackBy'); }
+  if(p.type==='pat'){
+    box.appendChild(h(`<div class="lbl" style="margin:8px 0 4px">Result</div>`));
+    const rr=h(`<div class="btnGrid c2" style="margin-bottom:6px"></div>`);
+    [[true,'Good','green'],[false,'No good','ghost']].forEach(([v,l,cls])=>{
+      const b=h(`<button class="btn sm ${p.pat.good===v?cls:'ghost'}">${l}</button>`);
+      b.onclick=()=>{p.pat.good=v;persist();render();}; rr.appendChild(b); });
+    box.appendChild(rr);
+    box.appendChild(h(`<div class="lbl" style="margin:8px 0 4px">Type</div>`));
+    const tt=h(`<div class="btnGrid c2" style="margin-bottom:6px"></div>`);
+    [['1','1-pt (from 5)'],['2','2-pt (from 10)']].forEach(([v,l])=>{
+      const b=h(`<button class="btn sm ${p.pat.type===v?'blue':'ghost'}">${l}</button>`);
+      b.onclick=()=>{p.pat.type=v;persist();render();}; tt.appendChild(b); });
+    box.appendChild(tt);
+    if(p.pat.via==='pass'){ pick('Passer',off,'passer'); pick('Receiver',off,'receiver'); }
+    else if(p.pat.via==='run'){ pick('Ball carrier',off,'rusher'); }
+  }
+  if(p.type==='penalty'){
+    box.appendChild(h(`<div class="lbl" style="margin:8px 0 4px">On</div>`));
+    const onr=h(`<div class="btnGrid c2" style="margin-bottom:6px"></div>`);
+    [['off','Offense'],['def','Defense']].forEach(([v,l])=>{
+      const b=h(`<button class="btn sm ${p.penalty.on===v?'amber':'ghost'}">${l}</button>`);
+      b.onclick=()=>{p.penalty.on=v;persist();render();}; onr.appendChild(b); });
+    box.appendChild(onr);
+    box.appendChild(h(`<div class="lbl" style="margin:8px 0 4px">Yards: <span class="num">${p.penalty.yards>=L?'half distance':p.penalty.yards+' yd'}</span></div>`));
+    const yr=h(`<div class="btnGrid c4" style="margin-bottom:6px"></div>`);
+    [[-5,'−5'],[-1,'−1'],[1,'+1'],[5,'+5']].forEach(([dv,l])=>{
+      const b=h(`<button class="btn sm ghost">${l}</button>`);
+      b.onclick=()=>{ p.penalty.yards=Math.max(0,Math.min(L,(p.penalty.yards||0)+dv)); persist(); render(); };
+      yr.appendChild(b); });
+    box.appendChild(yr);
+    const half=h(`<button class="btn sm ${p.penalty.yards>=L?'amber':'ghost'}" style="width:100%;margin-bottom:6px">Half the distance</button>`);
+    half.onclick=()=>{p.penalty.yards=L;persist();render();}; box.appendChild(half);
+    const fl=h(`<div class="btnGrid c2" style="margin-bottom:6px"></div>`);
+    const af=h(`<button class="btn sm ${p.penalty.autoFirst?'green':'ghost'}">Auto 1st down</button>`);
+    af.onclick=()=>{p.penalty.autoFirst=!p.penalty.autoFirst;persist();render();};
+    const ld=h(`<button class="btn sm ${p.penalty.lossOfDown?'red':'ghost'}">Loss of down</button>`);
+    ld.onclick=()=>{p.penalty.lossOfDown=!p.penalty.lossOfDown;persist();render();};
+    fl.appendChild(af); fl.appendChild(ld); box.appendChild(fl);
+  }
+  if(p.interception && typeof p.intReturnEndSpot==='number'){
+    box.appendChild(h(`<div class="lbl" style="margin:8px 0 4px">Return ended: <span class="num">${p.intReturnEndSpot>=L?'PICK-6':posLabel(g,p.intReturnEndSpot,def)}</span></div>`));
+    const r=h(`<div class="btnGrid c4" style="margin-bottom:6px"></div>`);
+    [[-5,'−5'],[-1,'−1'],[1,'+1'],[5,'+5']].forEach(([dv,l])=>{
+      const b=h(`<button class="btn sm ghost">${l}</button>`);
+      b.onclick=()=>{ p.intReturnEndSpot=Math.max(0,Math.min(L,p.intReturnEndSpot+dv));
+        p.intReturnYds=Math.max(0,p.intReturnEndSpot-(L-p.startSpot)); persist(); render(); };
+      r.appendChild(b); });
+    box.appendChild(r);
+  }
   if(!p.interception && typeof p.endSpot==='number'){
     box.appendChild(h(`<div class="lbl" style="margin:8px 0 4px">End spot: <span class="num">${esc(posLabel(g,p.endSpot,pre.possession))}</span> (${(p.endSpot-p.startSpot>=0?'+':'')}${p.endSpot-p.startSpot} yd)</div>`));
     const r=h(`<div class="btnGrid c4" style="margin-bottom:6px"></div>`);
@@ -1277,11 +1355,12 @@ function exportGameReport(g){
 }
 
 /* ---- Standings ---- */
-function computeStandings(gamesList){
+function computeStandings(gamesList,seedTeams){
   const tbl={};
   const row=(n)=>{ if(!tbl[n]) tbl[n]={team:n,pld:0,w:0,d:0,l:0,gf:0,ga:0}; return tbl[n]; };
+  (seedTeams||[]).forEach(row); // shows every known team, even 0 games played
   gamesList.forEach(g=>{
-    if(!g.plays||!g.plays.length) return;
+    if(!g.finished) return; // an ongoing game is not a result yet — never count it as a draw/win/loss
     const st=deriveState(g.plays,g.settings);
     const H=row(g.teams.home.name), A=row(g.teams.away.name);
     H.pld++; A.pld++; H.gf+=st.home; H.ga+=st.away; A.gf+=st.away; A.ga+=st.home;
@@ -1619,21 +1698,39 @@ function renderTourney(){
     const entries=Object.entries(liveGames).filter(([k,rec])=>rec.game&&rec.game.plays&&rec.game.plays.length>0);
     if(!entries.length){ lc0.appendChild(h(`<div class="help">Watching for live games… nothing received yet. Auto-refreshes every 20 s (updates can take up to a minute to propagate).</div>`)); }
     if(liveStatus){ lc0.appendChild(h(`<div class="help" style="margin-bottom:6px;${liveStatus.startsWith('error')?'color:var(--red);font-weight:700':''}">${esc(liveStatus)}</div>`)); }
-    entries.sort((a,b)=>b[1].updated-a[1].updated).forEach(([dev,rec])=>{
+    entries.sort((a,b)=>{ // live games first, then most recently updated
+      const fa=a[1].game.finished?1:0, fb=b[1].game.finished?1:0;
+      if(fa!==fb) return fa-fb;
+      return b[1].updated-a[1].updated; }).forEach(([dev,rec])=>{
       const g=rec.game; const st=deriveState(g.plays,g.settings);
       const ago=Math.max(0,Math.round((Date.now()-rec.updated)/1000));
-      const posN=g.teams[st.possession].name;
-      const situ=st.awaitingPAT?'PAT':`${st.down}${['st','nd','rd','th'][Math.min(st.down,4)-1]} · ${posLabel(g,st.spot,st.possession)}`;
-      const clockTag=(g.clock&&g.clock.half)?` · H${g.clock.half}`:'';
-      const item=h(`<div class="gameItem" style="cursor:pointer"><div style="flex:1">
-        <div style="font-weight:800">${esc(g.teams.home.name)} <span class="num">${st.home}–${st.away}</span> ${esc(g.teams.away.name)}${g.finished?'<span class="finalBadge">FINAL</span>':''}</div>
-        <div class="meta">${esc(g.name||'')}${clockTag} · ${g.finished?'final':esc(posN)+' ball · '+esc(situ)} · ${g.plays.length} plays · ${ago<60?ago+'s':Math.round(ago/60)+'min'} ago · ${liveExpand[dev]?'tap to hide stats ▴':'tap for stats ▾'}</div>
-      </div></div>`);
-      item.onclick=()=>{ liveExpand[dev]=!liveExpand[dev]; render(); };
-      lc0.appendChild(item);
+      const situ=st.awaitingPAT?'Point after':`${st.down}${['st','nd','rd','th'][Math.min(st.down,4)-1]} &amp; ${posLabel(g,st.spot,st.possession)}`;
+      const clockTag=(g.clock&&g.clock.half)?(' · H'+g.clock.half+(g.clock.elapsed!=null?' '+fmtClock(clockNow(g)):'')):'';
+      const fieldM=(g.name||'').match(/Field\s*(\d)/i);
+      const fieldChip=fieldM?`<span class="liveFieldChip f${fieldM[1]}">FIELD ${fieldM[1]}</span>`:(g.name?`<span class="liveFieldChip">${esc(g.name.slice(0,18))}</span>`:'');
+      const card=h(`<div class="liveCard">
+        <div class="liveTop">
+          ${fieldChip}
+          ${g.finished?'<span class="finalBadge">FINAL</span>':'<span style="font-size:10px;color:var(--red);font-weight:800"><span class="liveDotSm"></span>LIVE</span>'}
+        </div>
+        <div class="liveScoreRow">
+          <div class="liveTeamName ${!g.finished&&st.possession==='home'?'poss':''}">${esc(g.teams.home.name)}</div>
+          <div class="liveScoreNum">${st.home}</div>
+          <div class="liveVs">–</div>
+          <div class="liveScoreNum">${st.away}</div>
+          <div class="liveTeamName ${!g.finished&&st.possession==='away'?'poss':''}" style="text-align:right">${esc(g.teams.away.name)}</div>
+        </div>
+        <div class="liveMetaRow">
+          <div>${g.finished?'Game final':esc(situ)}${clockTag}</div>
+          <div class="tapHint">${liveExpand[dev]?'hide stats ▴':'stats ▾'}</div>
+        </div>
+        <div class="liveMetaRow"><div>${g.plays.length} plays · updated ${ago<60?ago+'s':Math.round(ago/60)+'min'} ago</div><div></div></div>
+      </div>`);
+      card.onclick=()=>{ liveExpand[dev]=!liveExpand[dev]; render(); };
+      lc0.appendChild(card);
       if(liveExpand[dev]){
         const box=buildBoxScore(g);
-        box.style.padding='0 4px 8px'; lc0.appendChild(box);
+        box.style.padding='0 4px 10px'; lc0.appendChild(box);
       }
     });
     const rf=h(`<button class="btn sm ghost" style="margin-top:4px">Refresh now</button>`);
@@ -1674,7 +1771,7 @@ function renderTourney(){
   if(!tourneyGames.length) return;
 
   // standings
-  const standings=computeStandings(tourneyGames);
+  const standings=computeStandings(tourneyGames,Object.keys(teams));
   if(standings.length){
     const sc=h(`<div class="card"><h3>Standings</h3></div>`);
     let t=`<table class="stTable"><thead><tr><th>Team</th><th>PLD</th><th>W</th><th>D</th><th>L</th><th>PCT</th><th>GF</th><th>GA</th><th>GD</th></tr></thead><tbody>`;
@@ -1682,8 +1779,8 @@ function renderTourney(){
     t+=`</tbody></table>`;
     sc.appendChild(h(t));
     sc.appendChild(h(`<div class="help" style="margin-top:6px">Win percentage (draws count half) · computed from loaded games only.</div>`));
-    if(standings.length>=7){
-      const finals=tourneyGames.filter(g=>g.finished).length;
+    const finals=tourneyGames.filter(g=>g.finished).length;
+    if(standings.length>=7 && finals>0){
       const bb=h(`<button class="btn sm green" style="margin-top:8px">Create Sunday bracket (3 QFs) on this device</button>`);
       bb.onclick=()=>{
         const pairs=`QF2: <b>${esc(standings[3].team)}</b> vs <b>${esc(standings[4].team)}</b><br>QF3: <b>${esc(standings[1].team)}</b> vs <b>${esc(standings[6].team)}</b><br>QF4: <b>${esc(standings[2].team)}</b> vs <b>${esc(standings[5].team)}</b><br><br>1st seed <b>${esc(standings[0].team)}</b> has a bye into SF1.`;

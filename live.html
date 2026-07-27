@@ -226,6 +226,9 @@ function render(){
 function allGames(){ return Object.values(live).map(r=>r.game).filter(g=>g&&g.plays&&g.plays.length); }
 function standingsRows(){
   const tbl={}; const row=n=>tbl[n]||(tbl[n]={team:n,pld:0,w:0,d:0,l:0,gf:0,ga:0});
+  // seed every team seen in ANY broadcast game (even one still in progress) so the
+  // table shows the whole field, not just teams with a finished result yet
+  allGames().forEach(g=>{ row(g.teams.home.name); row(g.teams.away.name); });
   allGames().filter(g=>g.finished).forEach(g=>{
     const st=deriveState(g.plays,g.settings);
     const H=row(g.teams.home.name), A=row(g.teams.away.name);
