@@ -33,7 +33,7 @@ export default {
   async fetch(req, env, ctx) {
     const cors = {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET,PUT,OPTIONS',
+      'Access-Control-Allow-Methods': 'GET,PUT,DELETE,OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
     };
     if (req.method === 'OPTIONS') return new Response(null, { headers: cors });
@@ -95,6 +95,27 @@ export default {
       memCache = { t: 0, body: null }; // fresh data invalidates the cache
       return new Response('ok', { headers: cors });
     }
+    if (req.method === 'DELETE' && id) {
+      let keys = null;
+      try { keys = env.KEYS ? JSON.parse(env.KEYS) : null; } catch {}
+      const provided = url.searchParams.get('k') || url.searchParams.get('t') || '';
+      let ns = '';
+      if (keys) {
+        const name = keys[provided];
+        if (!name) return new Response('forbidden', { status: 403, headers: cors });
+        ns = String(name).replace(/[^\w-]/g, '') + ':';
+      } else if (env.TOKEN) {
+        if (provided !== env.TOKEN) return new Response('forbidden', { status: 403, headers: cors });
+      }
+      const storeKey = 'g:' + ns + id;   // a key can only delete inside its own namespace
+      await env.LIVE.delete(storeKey);
+      const ids = await readIndex(env);
+      const alive = ids.filter((k) => k !== storeKey);
+      if (alive.length !== ids.length) await env.LIVE.put('idx', JSON.stringify(alive));
+      memCache = { t: 0, body: null };
+      return new Response('deleted', { headers: cors });
+    }
+
     if (req.method === 'GET' && id) {
       const v = await env.LIVE.get('g:' + id);
       return new Response(v || 'null', { headers: { ...cors, 'Content-Type': 'application/json' } });

@@ -1114,7 +1114,7 @@ function defenderRow(g,defSide){
   wrap.appendChild(playerPicker(rosterOf(g,defSide),ui.pending.flagPullBy,pid=>{ui.pending.flagPullBy=pid;commit();}));
   return wrap;
 }
-const APP_VERSION='v39';
+const APP_VERSION='v41';
 const IOC_CODES={'Switzerland':'SUI','Ireland':'IRL','Sweden':'SWE','Ukraine':'UKR','Poland':'POL','Czechia':'CZE','Finland':'FIN','Germany':'GER','Austria':'AUT','France':'FRA','Italy':'ITA','Great Britain':'GBR'};
 /* Flag color stripes per nation — lets a spotter recognize the end zone by color,
    not just by reading the label. Ordered top-to-bottom as on the real flag. */
@@ -1546,6 +1546,8 @@ function renderSetup(){
     use.onclick=()=>{activeId=g.id;ui={step:'idle',pending:null};persist();switchTab('game');};
     const ex=h(`<button class="btn sm ghost">Export</button>`); ex.onclick=()=>exportGame(g);
     const sh=h(`<button class="btn sm ghost">Share</button>`); sh.onclick=()=>shareGame(g);
+    const rs=h(`<button class="btn sm ghost" title="Clear plays, keep the fixture">↺</button>`);
+    rs.onclick=()=>resetGamePlays(g);
     const del=h(`<button class="btn sm ghost">✕</button>`); del.onclick=()=>{
       if(g.practice){ showModal({title:'Delete practice game?',body:'Nothing from it is kept or broadcast.',
         buttons:[{label:'Delete',cls:'red',onTap:()=>doDeleteGame(g.id)},{label:'Cancel'}]}); return; }
@@ -1575,7 +1577,9 @@ function renderSetup(){
           ]
       });
     };
-    btns.appendChild(use);btns.appendChild(ex);btns.appendChild(sh);btns.appendChild(del);
+    btns.appendChild(use);btns.appendChild(ex);btns.appendChild(sh);
+    if(g.plays.length) btns.appendChild(rs);
+    btns.appendChild(del);
     item.appendChild(btns); gc.appendChild(item);
   });
   // reset + restore (testing / recovery)
@@ -1583,6 +1587,10 @@ function renderSetup(){
   if(games.length){
     const rst=h(`<button class="btn sm ghost" style="color:var(--red)">Reset all games…</button>`);
     rst.onclick=resetAllGames; dz.appendChild(rst);
+  }
+  if(LIVE_CONFIG.url){
+    const cb=h(`<button class="btn sm ghost">Clean live server…</button>`);
+    cb.onclick=clearOrphanBroadcasts; dz.appendChild(cb);
   }
   const tr=loadTrash();
   if(tr&&tr.games.length){
@@ -1734,6 +1742,48 @@ function renderSetup(){
   if(editingTeam!==undefined) root.appendChild(buildTeamEditor());
 }
 
+/* Remove a game's live broadcast from the relay (local delete alone can't — the
+   relay is a separate store, so a deleted game would linger in "Live now" for 7 days). */
+async function unbroadcast(g){
+  if(!LIVE_CONFIG.url || !writeCred() || !g) return false;
+  const cred=writeKey?('?k='+encodeURIComponent(writeKey)):('?t='+encodeURIComponent(LIVE_CONFIG.token));
+  try{
+    const r=await fetch(LIVE_CONFIG.url.replace(/\/$/,'')+'/g/'+deviceId+'-'+g.id+cred,{method:'DELETE'});
+    return r.ok;
+  }catch(e){ return false; }
+}
+/* Clear live entries that no longer exist on this device (e.g. after a reset, or
+   games broadcast from an earlier install). Only affects the public display. */
+async function clearOrphanBroadcasts(){
+  if(!LIVE_CONFIG.url||!writeCred()){ toast('Needs a keeper link'); return; }
+  toast('Checking server…');
+  let recs=[];
+  try{
+    const r=await fetch(LIVE_CONFIG.url.replace(/\/$/,'')+'/g',{cache:'no-store'});
+    const arr=await r.json();
+    recs=(Array.isArray(arr)?arr:[]).filter(x=>x&&x.game&&x.device);
+  }catch(e){ toast('Could not reach server'); return; }
+  const orphans=recs.filter(rec=>!games.some(g=>g.id===rec.game.id));
+  if(!orphans.length){ toast('Nothing stale on the server'); return; }
+  const list=orphans.slice(0,6).map(r=>esc(r.game.teams.home.name+' v '+r.game.teams.away.name)).join('<br>');
+  showModal({
+    title:'Remove '+orphans.length+' live entr'+(orphans.length===1?'y':'ies')+'?',
+    body:list+(orphans.length>6?'<br>…':'')+'<br><br>These are on the live server but not on this device.',
+    warn:'Only the public live display is affected — no local game data is touched.',
+    buttons:[
+      {label:'Remove from live',cls:'red',onTap:async()=>{
+        const cred=writeKey?('?k='+encodeURIComponent(writeKey)):('?t='+encodeURIComponent(LIVE_CONFIG.token));
+        let ok=0;
+        for(const rec of orphans){
+          try{ const r=await fetch(LIVE_CONFIG.url.replace(/\/$/,'')+'/g/'+rec.device+'-'+rec.game.id+cred,{method:'DELETE'});
+            if(r.ok) ok++; }catch(e){}
+        }
+        liveGames={}; toast(ok+' removed from live'); fetchLive(true); render();
+      }},
+      {label:'Cancel'}
+    ]});
+}
+
 /* ---- Deletion safety net ----
    Every delete first (a) writes a downloadable backup file and (b) keeps a copy in a
    local "recycle bin", so a wrong tap is always recoverable — by one-tap Restore, or
@@ -1752,16 +1802,45 @@ function backupFile(gamesArr,tag){
 function restoreTrash(){
   const t=loadTrash(); if(!t||!t.games.length){ toast('Nothing to restore'); return; }
   let n=0;
-  t.games.forEach(g=>{ if(!games.some(x=>x.id===g.id)){ games.push(g); n++; } });
+  t.games.forEach(g=>{
+    const i=games.findIndex(x=>x.id===g.id);
+    if(i<0){ games.push(g); n++; }                       // deleted game: bring it back
+    else if(!games[i].plays.length && g.plays.length){    // reset game: restore its plays
+      games[i]=g; n++; }
+  });
   store.save(LS_TRASH,null); persist(); render();
-  toast(n?(n+' game(s) restored'):'Those games are already here');
+  toast(n?(n+' game(s) restored'):'Nothing needed restoring');
 }
 function doDeleteGame(id){
   const g=games.find(x=>x.id===id);
   if(g && g.plays && g.plays.length && !g.practice){ saveTrash([g],(g.teams.home.name+' vs '+g.teams.away.name)); backupFile([g],'game'); }
+  if(g) unbroadcast(g); // also take it off the live page
   games=games.filter(x=>x.id!==id); if(activeId===id)activeId=games[0]?.id||null;
   persist(); render(); toast('Game deleted — Restore available');
 }
+/* Reset ONE game: wipe its plays but keep the fixture (teams, label, schedule slot).
+   Backed up to the recycle bin + a file, and removed from the live page. */
+function resetGamePlays(g){
+  if(!g.plays.length){ toast('Game has no plays yet'); return; }
+  const st=deriveState(g.plays,g.settings);
+  showModal({
+    title:'Reset this game to 0–0?',
+    body:`<b>${esc(g.teams.home.name)} ${st.home}–${st.away} ${esc(g.teams.away.name)}</b> · ${g.plays.length} plays<br><br>The fixture, teams and rosters stay — only the logged plays are cleared.`,
+    warn:'A backup is saved and the game stays restorable on this device.',
+    buttons:[
+      {label:'Reset plays',cls:'red',onTap:()=>{
+        saveTrash([JSON.parse(JSON.stringify(g))],'reset of '+g.teams.home.name+' vs '+g.teams.away.name);
+        backupFile([JSON.parse(JSON.stringify(g))],'reset-game');
+        unbroadcast(g);
+        g.plays=[]; g.finished=false; g.clock=null;
+        delete g.exportedPlays; delete g._syncedPlays;
+        persist(); render(); toast('Game reset — Restore available');
+        setTimeout(()=>{ liveGames={}; fetchLive(true); },400);
+      }},
+      {label:'Cancel'}
+    ]});
+}
+
 /* Reset every game on this device (testing / fresh start), with backup + double confirm */
 function resetAllGames(){
   const played=games.filter(g=>g.plays&&g.plays.length&&!g.practice);
@@ -1779,10 +1858,13 @@ function resetAllGames(){
           body:`Second and final check: <b>${total}</b> game(s) will be removed from this device.`,
           warn:'Tap Delete only if you are sure.',
           buttons:[
-            {label:'Delete all games',cls:'red',onTap:()=>{
+            {label:'Delete all games',cls:'red',onTap:async()=>{
               saveTrash(games.slice(),'reset of '+total+' game(s)');
+              const toClear=games.slice();
               games=[]; activeId=null; persist(); render();
-              toast(total+' game(s) deleted — Restore available'); }},
+              toast(total+' game(s) deleted — Restore available');
+              for(const g of toClear){ if(g.plays&&g.plays.length) await unbroadcast(g); }
+              liveGames={}; fetchLive(true); render(); }},
             {label:'Cancel'}
           ]});
       }},
