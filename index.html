@@ -1114,7 +1114,7 @@ function defenderRow(g,defSide){
   wrap.appendChild(playerPicker(rosterOf(g,defSide),ui.pending.flagPullBy,pid=>{ui.pending.flagPullBy=pid;commit();}));
   return wrap;
 }
-const APP_VERSION='v37';
+const APP_VERSION='v38';
 const IOC_CODES={'Switzerland':'SUI','Ireland':'IRL','Sweden':'SWE','Ukraine':'UKR','Poland':'POL','Czechia':'CZE','Finland':'FIN','Germany':'GER','Austria':'AUT','France':'FRA','Italy':'ITA','Great Britain':'GBR'};
 /* Flag color stripes per nation — lets a spotter recognize the end zone by color,
    not just by reading the label. Ordered top-to-bottom as on the real flag. */
@@ -1666,14 +1666,19 @@ function renderSetup(){
   const tc=h(`<div class="card"><h3>Team library</h3></div>`);
   if(!teamNames.length) tc.appendChild(h(`<div class="empty">No teams yet.</div>`));
   teamNames.forEach(tn=>{
-    const row=h(`<div class="teamRow"><div><div style="font-weight:800">${esc(tn)}</div>
-      <div class="meta">${teams[tn].players.length} players</div></div></div>`);
+    const isReal=isRealTeam(tn,teams[tn]);
+    const row=h(`<div class="teamRow"><div><div style="font-weight:800">${esc(tn)}${isReal?'':'<span class="finalBadge" style="background:var(--muted2)">TEST</span>'}</div>
+      <div class="meta">${teams[tn].players.length} players · ${isReal?'published to live page':'not published'}</div></div></div>`);
     const btns=h(`<div class="flexbtns"></div>`);
+    const tgl=h(`<button class="btn sm ${isReal?'green':'ghost'}" title="Include on the public live page">${isReal?'Real':'Test'}</button>`);
+    tgl.onclick=()=>{ const t=teams[tn];
+      if(isRealTeam(tn,t)){ t.real=false; t.test=true; } else { t.real=true; delete t.test; }
+      persist(); render(); };
     const edit=h(`<button class="btn sm ghost">Edit</button>`); edit.onclick=()=>editTeam(tn);
     const del=h(`<button class="btn sm ghost">✕</button>`); del.onclick=()=>{
       showModal({title:'Delete team '+esc(tn)+'?',body:teams[tn].players.length+' players. Games already created keep their copy of the roster.',
         buttons:[{label:'Delete',cls:'red',onTap:()=>{delete teams[tn];persist();render();toast('Team deleted');}},{label:'Cancel'}]}); };
-    btns.appendChild(edit);btns.appendChild(del);row.appendChild(btns);tc.appendChild(row);
+    btns.appendChild(tgl);btns.appendChild(edit);btns.appendChild(del);row.appendChild(btns);tc.appendChild(row);
   });
   const tbar=h(`<div class="flexbtns" style="margin-top:8px"></div>`);
   const addBtn=h(`<button class="btn sm green">+ Add team</button>`);
@@ -1691,7 +1696,7 @@ function renderSetup(){
   impInput.onchange=async(e)=>{ const f=e.target.files[0]; if(!f) return;
     try{ const obj=JSON.parse(await f.text());
       if(obj&&obj.type==='flagstats-teams'&&obj.teams){
-        let n=0; for(const k in obj.teams){ if(unsafeKey(k)) continue; teams[k]=obj.teams[k]; n++; }
+        let n=0; for(const k in obj.teams){ if(unsafeKey(k)) continue; teams[k]=Object.assign({},obj.teams[k],{real:true}); n++; }
         persist(); render(); toast(n+' team(s) imported (rosters replaced)');
       } else toast('Not a roster file');
     }catch(err){ toast('Bad roster file'); } };
@@ -1723,7 +1728,7 @@ function buildTeamEditor(){
           const m2=l.match(/^#?(\d+)$/); if(m2) return {id:uid(),num:m2[1],name:''};
           return null; }).filter(Boolean);
         if(!players.length){ toast('No valid lines found'); return; }
-        cur.players=players; delete cur.test; persist(); render(); toast(players.length+' players'); }},
+        cur.players=players; delete cur.test; cur.real=true; persist(); render(); toast(players.length+' players'); }},
         {label:'Cancel'}]});
   };
   card.appendChild(pasteBtn);
@@ -1762,7 +1767,7 @@ function buildTeamEditor(){
   save.onclick=()=>{ const nm=nameIn.value.trim(); if(!nm){toast('Team needs a name');return;}
     if(isNew&&teams[nm]){toast('Team already exists');return;}
     if(!isNew&&editingTeam!==nm) delete teams[editingTeam];
-    teams[nm]={name:nm,players:working.filter(p=>p.num!=='').map(p=>({id:p.id||uid(),num:String(p.num),name:p.name||''}))};
+    teams[nm]={name:nm,real:true,players:working.filter(p=>p.num!=='').map(p=>({id:p.id||uid(),num:String(p.num),name:p.name||''}))};
     editingTeam=undefined; persist(); render(); };
   const cancel=h(`<button class="btn ghost sm">Cancel</button>`); cancel.onclick=()=>{editingTeam=undefined;render();};
   bar.appendChild(save);bar.appendChild(cancel);card.appendChild(bar);
@@ -2130,12 +2135,26 @@ async function deviceCheck(){
 function teamCodeName(n){ return (typeof IOC_CODES!=='undefined'&&IOC_CODES[n])||n.slice(0,3).toUpperCase(); }
 
 /* ---- ROSTERS VIA RELAY: publish once, every device pulls ---- */
-/* Only hand-entered / pasted squads count as real; generated test rosters are excluded
-   from publishing so placeholder names never appear on the public spectator page. */
+/* Which squads are REAL (publishable)?
+   A stored flag alone isn't enough — test rosters created by older versions have no
+   flag — so we also detect generated placeholder data by its contents. `real:true`
+   (set by pasting/saving, or by the manual toggle) always wins. */
+function looksGenerated(name,t){
+  const pool=TEST_POOLS[name]; const ps=t.players||[];
+  if(!pool||!ps.length) return false;
+  const fake=new Set(); pool.f.forEach((f,i)=>fake.add((f+' '+pool.l[i]).toLowerCase()));
+  const hits=ps.filter(p=>fake.has(String(p.name||'').toLowerCase())).length;
+  return hits>=Math.max(2,Math.ceil(ps.length*0.5)); // half or more are placeholder names
+}
+function isRealTeam(name,t){
+  if(!t||!(t.players||[]).length) return false;
+  if(t.real===true) return true;      // explicitly confirmed (pasted / saved / toggled on)
+  if(t.test===true) return false;     // explicitly generated
+  return !looksGenerated(name,t);     // legacy data: judge by contents
+}
 function realTeams(){
   const out={};
-  for(const k in teams){ const t=teams[k];
-    if(t && !t.test && (t.players||[]).length) out[k]=t; }
+  for(const k in teams){ if(isRealTeam(k,teams[k])) out[k]=teams[k]; }
   return out;
 }
 async function publishRosters(){
