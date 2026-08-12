@@ -39,6 +39,14 @@
   td.num{font-family:var(--mono)}
   .teamHead{font-weight:800;font-size:12px;color:var(--amber);margin-top:10px}
   .squadRow{padding:9px 4px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px;cursor:pointer}
+  .schedDay{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:10px 0 4px;font-weight:700}
+  .schedRow{display:grid;grid-template-columns:64px 1fr auto;align-items:center;gap:8px;padding:7px 2px;border-bottom:1px solid var(--line);font-size:12px}
+  .schedMeta{color:var(--muted);font-family:var(--mono);font-size:10.5px}
+  .schedTeams{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .schedStat{text-align:right}
+  .schedTime{color:var(--muted);font-family:var(--mono)}
+  .schedScore{font-family:var(--mono);font-weight:800}
+  .schedLive{color:var(--red);font-weight:800;font-size:10px}
   .empty{color:var(--muted);text-align:center;padding:30px 10px;font-size:13px}
   .status{font-size:10px;color:var(--muted);text-align:center;margin-top:8px}
   .err{color:var(--red);font-weight:700}
@@ -51,6 +59,7 @@
   <div class="sub">Women's Flag Football · live scores &amp; stats · updates automatically</div>
   <div id="games"><div class="empty">Waiting for live games…</div></div>
   <div id="tables"></div>
+  <div id="schedule"></div>
   <div id="squads"></div>
   <div class="status" id="status" style="cursor:pointer" title="Tap to refresh" onclick="poll()"></div>
 </div>
@@ -170,7 +179,20 @@ function posLabel(g,yard,off){ const L=g.settings.fieldLength, mid=g.settings.mi
   if(yard===mid) return 'midfield'; if(yard<mid) return teamCode(g,off)+' '+yard; return teamCode(g,def)+' '+(L-yard); }
 function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
-let live={}, expand={}, rosters={updated:0,teams:null}, rosterOpen={};
+let live={}, expand={}, rosters={updated:0,teams:null}, rosterOpen={}, showAllSched=false;
+const NC_SCHEDULE=[
+ ['Fri 21.8','10:00','Field 1','Sweden','Ukraine'],['Fri 21.8','10:00','Field 2','Ireland','Czechia'],
+ ['Fri 21.8','11:15','Field 1','Finland','Switzerland'],['Fri 21.8','11:15','Field 2','Ukraine','Poland'],
+ ['Fri 21.8','12:30','Field 1','Sweden','Czechia'],['Fri 21.8','12:30','Field 2','Ireland','Switzerland'],
+ ['Fri 21.8','13:45','Field 1','Finland','Poland'],['Fri 21.8','13:45','Field 2','Ireland','Ukraine'],
+ ['Fri 21.8','15:00','Field 1','Switzerland','Poland'],['Fri 21.8','15:00','Field 2','Finland','Sweden'],
+ ['Sat 22.8','09:00','Field 1','Czechia','Ukraine'],['Sat 22.8','09:00','Field 2','Poland','Sweden'],
+ ['Sat 22.8','10:15','Field 1','Ukraine','Finland'],['Sat 22.8','10:15','Field 2','Czechia','Switzerland'],
+ ['Sat 22.8','11:30','Field 1','Switzerland','Sweden'],['Sat 22.8','11:30','Field 2','Ireland','Poland'],
+ ['Sat 22.8','13:45','Field 1','Czechia','Finland'],['Sat 22.8','13:45','Field 2','Ireland','Sweden'],
+ ['Sat 22.8','15:00','Field 1','Ukraine','Switzerland'],['Sat 22.8','15:00','Field 2','Poland','Czechia'],
+ ['Sat 22.8','16:15','Field 2','Ireland','Finland'],
+];
 function applyTheme(light){
   document.documentElement.setAttribute('data-theme', light?'light':'dark');
   const mc=document.querySelector('meta[name="theme-color"]'); if(mc) mc.setAttribute('content', light?'#EEF1F5':'#14171C');
@@ -238,6 +260,7 @@ function render(){
   });
   }
   renderTables();
+  renderSchedule();
   renderSquads();
 }
 
@@ -273,6 +296,47 @@ function leaderRows(){
     });
   });
   return Object.values(agg);
+}
+function renderSchedule(){
+  const root=document.getElementById('schedule'); if(!root) return;
+  // match a broadcast game to a schedule row by its label, falling back to the team pair
+  const received=Object.values(live).map(r=>r.game).filter(Boolean);
+  const findGame=(label,home,away)=>{
+    let g=received.find(x=>(x.name||'')===label);
+    if(!g) g=received.find(x=>x.teams&&x.teams.home.name===home&&x.teams.away.name===away&&(x.name||'').indexOf(label.split(' ·')[0])===0);
+    return g;
+  };
+  const rows=NC_SCHEDULE.map(([day,time,field,home,away])=>{
+    const label=day+' '+time+' · '+field;
+    const g=findGame(label,home,away);
+    let status='upcoming', score='';
+    if(g){ const st=deriveState(g.plays,g.settings);
+      score=st.home+'–'+st.away;
+      status=g.finished?'final':'live'; }
+    return {day,time,field,home,away,status,score};
+  });
+  const done=rows.filter(r=>r.status!=='upcoming').length;
+  // default view: anything not yet final, plus the last few results
+  const visible=showAllSched?rows:rows.filter(r=>r.status!=='final').slice(0,8);
+  let html='<div class="card"><div class="teamHead" style="margin-top:0">Schedule ('+done+' of 21 played)</div>';
+  let lastDay='';
+  visible.forEach(r=>{
+    if(r.day!==lastDay){ html+='<div class="schedDay">'+esc(r.day==='Fri 21.8'?'Friday 21 August':'Saturday 22 August')+'</div>'; lastDay=r.day; }
+    const badge = r.status==='live' ? '<span class="schedLive"><span class="liveDot"></span>LIVE</span>'
+      : r.status==='final' ? '<span class="schedScore">'+esc(r.score)+'</span>'
+      : '<span class="schedTime">'+esc(r.time)+'</span>';
+    const scoreLive = r.status==='live' ? ' <span class="schedScore">'+esc(r.score)+'</span>' : '';
+    html+='<div class="schedRow"><div class="schedMeta">'+esc(r.time)+' · '+esc(r.field.replace('Field ','F'))+'</div>'+
+      '<div class="schedTeams">'+esc(r.home)+' <span style="color:var(--muted)">v</span> '+esc(r.away)+scoreLive+'</div>'+
+      '<div class="schedStat">'+badge+'</div></div>';
+  });
+  if(rows.length>visible.length || showAllSched){
+    html+='<div class="toggle" id="schedToggle">'+(showAllSched?'show upcoming only ▴':'show full schedule &amp; results ▾')+'</div>';
+  }
+  html+='</div>';
+  root.innerHTML=html;
+  const tg=document.getElementById('schedToggle');
+  if(tg) tg.onclick=()=>{ showAllSched=!showAllSched; renderSchedule(); };
 }
 function renderSquads(){
   const root=document.getElementById('squads'); if(!root) return;
