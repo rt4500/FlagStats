@@ -210,7 +210,7 @@ function fmt(g){
 }
 /* Team totals: computed straight from the play list (numbers coerced — remote data). */
 function teamTotals(g){
-  const T=side=>({yds:0,comp:0,att:0,td:0,c1m:0,c1a:0,c2m:0,c2a:0,to:0,flags:0,sacks:0,defint:0});
+  const T=side=>({yds:0,comp:0,att:0,ptd:0,rtd:0,c1m:0,c1a:0,c2m:0,c2a:0,to:0,flags:0,sacks:0,defint:0});
   const t={home:T(),away:T()};
   (g.plays||[]).forEach(p=>{
     const off=p.offense==='away'?'away':'home', def=off==='home'?'away':'home';
@@ -222,7 +222,7 @@ function teamTotals(g){
     }
     if(p.type==='run') t[off].yds+=gain;
     if(p.type==='sack'){ t[off].yds+=gain; t[def].sacks++; }
-    if(p.touchdown) t[off].td++;
+    if(p.touchdown){ if(p.type==='run') t[off].rtd++; else if(p.type==='pass'&&!p.interception) t[off].ptd++; }
     if(p.type==='pat'&&p.pat){
       if(String(p.pat.type)==='2'){ t[off].c2a++; if(p.pat.good) t[off].c2m++; }
       else { t[off].c1a++; if(p.pat.good) t[off].c1m++; }
@@ -240,7 +240,8 @@ function teamTotalsTable(g){
     '<table><thead><tr><th></th><th>'+code(g.teams.home.name)+'</th><th>'+code(g.teams.away.name)+'</th></tr></thead><tbody>'+
     row('Yards',H.yds,A.yds)+
     row('Completions',H.comp+'/'+H.att,A.comp+'/'+A.att)+
-    row('TD',H.td,A.td)+
+    row('Pass/Rec TD',H.ptd,A.ptd)+
+    row('Rush TD',H.rtd,A.rtd)+
     row('1-pt conv',H.c1m+'/'+H.c1a,A.c1m+'/'+A.c1a)+
     row('2-pt conv',H.c2m+'/'+H.c2a,A.c2m+'/'+A.c2a)+
     row('Turnovers',H.to,A.to)+
@@ -261,7 +262,7 @@ function boxTables(g){
       out+='<table><thead><tr><th>Player</th><th>C/A</th><th>Pyd</th><th>Rec</th><th>Ryd</th><th>Rush</th><th>TD</th></tr></thead><tbody>';
       off.forEach(({p,s})=>{ out+='<tr><td>#'+esc(p.num)+' '+esc(p.name||'')+'</td><td class="num">'+s.comp+'/'+s.att+
         '</td><td class="num">'+s.passYds+'</td><td class="num">'+s.rec+'</td><td class="num">'+s.recYds+
-        '</td><td class="num">'+s.rushYds+'</td><td class="num">'+(s.passTD+s.recTD+s.rushTD+s.intRetTD)+'</td></tr>'; });
+        '</td><td class="num">'+s.rushYds+'</td><td class="num">'+(s.recTD+s.rushTD+s.intRetTD)+'</td></tr>'; });
       out+='</tbody></table>';
     }
     const def=rows.filter(x=>x.s.flags||x.s.sacks||x.s.pbu||x.s.defint);
@@ -432,7 +433,7 @@ function renderTables(){
     lead('Passing yards',l=>l.passYds,l=>l.passYds);
     lead('Receiving yards',l=>l.recYds,l=>l.recYds+' ('+l.rec+')');
     lead('Rushing yards',l=>l.rushYds,l=>l.rushYds);
-    lead('Touchdowns',l=>l.passTD+l.recTD+l.rushTD+l.intRetTD,l=>l.passTD+l.recTD+l.rushTD+l.intRetTD);
+    lead('TD scored',l=>l.recTD+l.rushTD+l.intRetTD,l=>l.recTD+l.rushTD+l.intRetTD);
     lead('Flag pulls',l=>l.flags,l=>l.flags);
     lead('Interceptions',l=>l.defint,l=>l.defint+(l.intRetTD?' ('+l.intRetTD+' TD)':''));
     html+='</div>';

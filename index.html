@@ -1072,7 +1072,7 @@ function defenderRow(g,defSide){
   wrap.appendChild(playerPicker(rosterOf(g,defSide),ui.pending.flagPullBy,pid=>{ui.pending.flagPullBy=pid;commit();}));
   return wrap;
 }
-const APP_VERSION='v49';
+const APP_VERSION='v51';
 const IOC_CODES={'Switzerland':'SUI','Ireland':'IRL','Sweden':'SWE','Ukraine':'UKR','Poland':'POL','Czechia':'CZE','Finland':'FIN','Germany':'GER','Austria':'AUT','France':'FRA','Italy':'ITA','Great Britain':'GBR'};
 /* Flag color stripes per nation — lets a spotter recognize the end zone by color,
    not just by reading the label. Ordered top-to-bottom as on the real flag. */
@@ -1431,7 +1431,7 @@ function buildBoxScore(g){
       off.forEach(({p,s})=>{ t+=`<tr><td>#${esc(p.num)} ${esc(p.name||'')}</td>
         <td class="num">${s.comp}/${s.att}</td><td class="num">${s.passYds}</td>
         <td class="num">${s.rec}</td><td class="num">${s.recYds}</td>
-        <td class="num">${s.rushYds}</td><td class="num">${s.passTD+s.recTD+s.rushTD}</td></tr>`; });
+        <td class="num">${s.rushYds}</td><td class="num">${s.recTD+s.rushTD+s.intRetTD}</td></tr>`; });
       t+=`</tbody></table>`; wrap.appendChild(h(t));
     }
     // QB efficiency lines
@@ -2126,7 +2126,7 @@ function renderTourney(){
   leaderC(lc,'Passing TD',l=>l.passTD,l=>l.passTD);
   leaderC(lc,'Receiving yards',l=>l.recYds,l=>l.recYds+' ('+l.rec+' rec)');
   leaderC(lc,'Rushing yards',l=>l.rushYds,l=>l.rushYds);
-  leaderC(lc,'Total TD',l=>l.passTD+l.recTD+l.rushTD+l.intRetTD,l=>l.passTD+l.recTD+l.rushTD+l.intRetTD);
+  leaderC(lc,'TD scored',l=>l.recTD+l.rushTD+l.intRetTD,l=>l.recTD+l.rushTD+l.intRetTD);
   leaderC(lc,'Conversion points',l=>l.convPts,l=>l.convPts);
   leaderC(lc,'Flag pulls',l=>l.flags,l=>l.flags);
   leaderC(lc,'Sacks',l=>l.sacks,l=>l.sacks);
