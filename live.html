@@ -208,9 +208,50 @@ function fmt(g){
   const st=deriveState(g.plays,g.settings);
   return {st};
 }
+/* Team totals: computed straight from the play list (numbers coerced — remote data). */
+function teamTotals(g){
+  const T=side=>({yds:0,comp:0,att:0,td:0,c1m:0,c1a:0,c2m:0,c2a:0,to:0,flags:0,sacks:0,defint:0});
+  const t={home:T(),away:T()};
+  (g.plays||[]).forEach(p=>{
+    const off=p.offense==='away'?'away':'home', def=off==='home'?'away':'home';
+    const gain=(Number(p.endSpot)||0)-(Number(p.startSpot)||0);
+    if(p.type==='pass'&&!p.pat){
+      t[off].att++;
+      if(p.complete){ t[off].comp++; t[off].yds+=gain; }
+      if(p.interception){ t[off].to++; t[def].defint++; }
+    }
+    if(p.type==='run') t[off].yds+=gain;
+    if(p.type==='sack'){ t[off].yds+=gain; t[def].sacks++; }
+    if(p.touchdown) t[off].td++;
+    if(p.type==='pat'&&p.pat){
+      if(String(p.pat.type)==='2'){ t[off].c2a++; if(p.pat.good) t[off].c2m++; }
+      else { t[off].c1a++; if(p.pat.good) t[off].c1m++; }
+    }
+    if(p.flagPullBy) t[def].flags++;
+  });
+  return t;
+}
+function teamTotalsTable(g){
+  const t=teamTotals(g);
+  const code=n=>esc(String(n).slice(0,3).toUpperCase());
+  const H=t.home,A=t.away;
+  const row=(label,hv,av)=>'<tr><td>'+label+'</td><td class="num">'+hv+'</td><td class="num">'+av+'</td></tr>';
+  return '<div class="teamHead">Team totals</div>'+
+    '<table><thead><tr><th></th><th>'+code(g.teams.home.name)+'</th><th>'+code(g.teams.away.name)+'</th></tr></thead><tbody>'+
+    row('Yards',H.yds,A.yds)+
+    row('Completions',H.comp+'/'+H.att,A.comp+'/'+A.att)+
+    row('TD',H.td,A.td)+
+    row('1-pt conv',H.c1m+'/'+H.c1a,A.c1m+'/'+A.c1a)+
+    row('2-pt conv',H.c2m+'/'+H.c2a,A.c2m+'/'+A.c2a)+
+    row('Turnovers',H.to,A.to)+
+    row('Flag pulls',H.flags,A.flags)+
+    row('Sacks',H.sacks,A.sacks)+
+    row('INT (def)',H.defint,A.defint)+
+    '</tbody></table>';
+}
 function boxTables(g){
   const stats=computeStats(g);
-  let out='';
+  let out=teamTotalsTable(g);
   ['home','away'].forEach(side=>{
     const rows=(g.teams[side].players||[]).map(p=>({p,s:stats[side][p.id]})).filter(x=>x.s);
     if(!rows.length) return;
@@ -246,7 +287,7 @@ function render(){
     const ago=Math.max(0,Math.round((Date.now()-rec.updated)/1000));
     const situ=g.finished?'Final':(st.awaitingPAT?'Point after':(g.teams[st.possession].name+' ball · '+
       st.down+['st','nd','rd','th'][Math.min(st.down,4)-1]+' · '+posLabel(g,st.spot,st.possession)));
-    const half=(g.clock&&(+g.clock.half))?(' · H'+Math.max(1,Math.min(9,+g.clock.half))):'';
+    const half='';
     const card=document.createElement('div'); card.className='card';
     card.innerHTML='<div class="score">'+
       '<div><div class="tn">'+esc(g.teams.home.name)+'</div><div class="sc">'+st.home+'</div></div>'+

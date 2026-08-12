@@ -532,49 +532,7 @@ function newPending(game){
     interception:false, interceptedBy:null, intReturnEndSpot:null, intReturnYds:0,
     flagPullBy:null, missedFlagBy:null, defendedBy:null, sackBy:null, penalty:null, pat:null };
 }
-/* ---- Game clock (optional, counts DOWN) ---- */
-function halfSeconds(){ return (prefs.halfMin||20)*60; }
-function ensureClock(g){ if(!g.clock) g.clock={half:1,elapsed:0,running:false,startedAt:0};
-  if(!g.clock.halfLen) g.clock.halfLen=halfSeconds(); return g.clock; }
-function setHalfMin(min){ prefs.halfMin=Math.max(5,Math.min(30,min)); store.save('fs_prefs',prefs);
-  // apply to every clock that hasn't been used yet
-  games.forEach(g=>{ if(g.clock && !g.clock.running && g.clock.elapsed===0) g.clock.halfLen=halfSeconds(); });
-  persist(); render(); }
-function clockElapsed(g){ const c=ensureClock(g); return c.running ? c.elapsed+Math.floor((Date.now()-c.startedAt)/1000) : c.elapsed; }
-function clockNow(g){ const c=ensureClock(g); return Math.max(0, c.halfLen-clockElapsed(g)); } // remaining
-function clockToggle(g){ const c=ensureClock(g);
-  if(c.running){ c.elapsed=clockElapsed(g); c.running=false; }
-  else {
-    if(clockNow(g)<=0){
-      if(c.half===1){ showModal({title:'Start 2nd half?',body:'Resets the clock to a fresh half.',
-        buttons:[{label:'Start H2',cls:'green',onTap:()=>{clockSetHalf(g,2); const c2=ensureClock(g); c2.startedAt=Date.now(); c2.running=true; persist(); render();}},{label:'Cancel'}]}); }
-      else { toast('Half is over — tap H1/H2 to reset'); }
-      return;
-    }
-    c.startedAt=Date.now(); c.running=true;
-  }
-  persist(); render(); }
-function clockSetHalf(g,hf){ const c=ensureClock(g);
-  if(c.half===hf) return;
-  c.elapsed=0; c.running=false; c.half=hf; persist(); render(); }
-function clockEdit(g){ const c=ensureClock(g);
-  showModal({title:'Set clock',body:'Time remaining in this half (sync with the official clock).',
-    inputs:[{key:'t',label:'mm:ss',value:fmtClock(clockNow(g)),numeric:true}],
-    buttons:[
-      {label:'Set',cls:'green',onTap:(v)=>{
-        const m=String(v.t||'').trim().match(/^(\d{1,2})[:.](\d{1,2})$/);
-        if(!m){ toast('Use mm:ss'); return; }
-        const rem=Math.min(c.halfLen,(+m[1])*60+(+m[2]));
-        c.elapsed=c.halfLen-rem; if(c.running) c.startedAt=Date.now();
-        persist(); render(); }},
-      {label:'Cancel'}
-    ]});
-}
-function fmtClock(sec){ const m=Math.floor(sec/60), s=sec%60; return m+':'+String(s).padStart(2,'0'); }
-let clockTimer=setInterval(()=>{ const g=activeGame&&activeGame(); if(g&&g.clock&&g.clock.running){
-  const rem=clockNow(g);
-  const el=document.getElementById('clockTime'); if(el) el.textContent=fmtClock(rem);
-  if(rem<=0){ const c=g.clock; c.elapsed=c.halfLen; c.running=false; persist(); render(); toast('End of half'); } } },1000);
+/* Game clock feature removed — plays from older games may still carry half/clock stamps; they are simply ignored. */
 
 /* ---- Wake lock: keep the screen on while logging ---- */
 let wakeLock=null;
@@ -588,7 +546,6 @@ document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==
 
 function commit(){ const g=activeGame(); if(!g||!ui.pending) return;
   ui.pending.ts=Date.now();
-  if(prefs.clock){ const c=ensureClock(g); ui.pending.half=c.half; ui.pending.clock=clockNow(g); }
   g.plays.push(ui.pending); ui.pending=null; ui.step='idle'; persist(); render(); toast('Play saved'); }
 function undo(){ const g=activeGame(); if(!g) return;
   if(ui.pending){ ui.pending=null; ui.step='idle'; render(); return; }
@@ -653,19 +610,6 @@ function renderGame(){
     </div>
    </div>`));
 
-  // optional game clock
-  if(prefs.clock){
-    const c=ensureClock(g);
-    const board=root.querySelector('.board');
-    const cb=h(`<div class="clockBar"></div>`);
-    const h1=h(`<button class="btn sm ${c.half===1?'amber':'ghost'}">H1</button>`); h1.onclick=()=>clockSetHalf(g,1);
-    const h2=h(`<button class="btn sm ${c.half===2?'amber':'ghost'}">H2</button>`); h2.onclick=()=>clockSetHalf(g,2);
-    const ct=h(`<div class="ct num" id="clockTime" style="cursor:pointer" title="Tap to set">${fmtClock(clockNow(g))}</div>`);
-    ct.onclick=()=>clockEdit(g);
-    const go=h(`<button class="btn sm ${c.running?'red':'green'}">${c.running?'Pause':'Start'}</button>`); go.onclick=()=>clockToggle(g);
-    cb.appendChild(h1);cb.appendChild(h2);cb.appendChild(ct);cb.appendChild(go);
-    board.appendChild(cb);
-  }
 
   // finished game: summary view instead of logging UI
   if(g.finished){
@@ -1128,7 +1072,7 @@ function defenderRow(g,defSide){
   wrap.appendChild(playerPicker(rosterOf(g,defSide),ui.pending.flagPullBy,pid=>{ui.pending.flagPullBy=pid;commit();}));
   return wrap;
 }
-const APP_VERSION='v47';
+const APP_VERSION='v49';
 const IOC_CODES={'Switzerland':'SUI','Ireland':'IRL','Sweden':'SWE','Ukraine':'UKR','Poland':'POL','Czechia':'CZE','Finland':'FIN','Germany':'GER','Austria':'AUT','France':'FRA','Italy':'ITA','Great Britain':'GBR'};
 /* Flag color stripes per nation — lets a spotter recognize the end zone by color,
    not just by reading the label. Ordered top-to-bottom as on the real flag. */
@@ -1236,7 +1180,6 @@ function describePlay(g,p,pre){
   const gain=(typeof p.endSpot==='number'&&typeof p.startSpot==='number')?(p.endSpot-p.startSpot):0;
   const yd=(n)=>((n>=0?'+':'')+n);
   let situ = pre.awaitingPAT ? `${offN} · PAT` : `${offN} · ${pre.down}${['st','nd','rd','th'][Math.min(pre.down,4)-1]} · ${posLabel(g,pre.spot,off)}`;
-  if(prefs.clock && p.half) situ = `H${p.half} ${p.clock!=null?fmtClock(p.clock):''} · `+situ;
   let desc='', scoring=false;
   if(p.type==='pass'){
     const qb=pName(g,off,p.passer)||'QB';
@@ -1423,7 +1366,7 @@ function buildGameReport(g){
   lines.push('SCORING');
   let sim=[];
   g.plays.forEach(p=>{ const pre=deriveState(sim,S); const d=describePlay(g,p,pre);
-    if(d.scoring){ const tag=prefs.clock&&p.half?`[H${p.half} ${p.clock!=null?fmtClock(p.clock):''}] `:'';
+    if(d.scoring){ const tag='';
       const tm=pre.awaitingPAT?pre.patTeam:pre.possession;
       lines.push(`  ${tag}${teamCode(g,tm)}: ${d.desc}`); }
     sim.push(p); });
@@ -1670,16 +1613,6 @@ function renderSetup(){
     const b=h(`<button class="btn sm ${prefs[key]?'amber':'ghost'}">${prefs[key]?'On':'Off'}</button>`);
     b.onclick=()=>setPref(key,!prefs[key]); row.appendChild(b); return row;
   };
-  oc.appendChild(optRow('clock','Game clock','Track halves and time · stamps each play'));
-  // half length stepper (shown with clock option)
-  const hm=prefs.halfMin||20;
-  const hrow=h(`<div class="teamRow"><div><div style="font-weight:800">Half length</div><div class="meta">Game format: 2 × ${hm} min (IFAF default 2 × 20)</div></div></div>`);
-  const hctl=h(`<div class="flexbtns" style="align-items:center"></div>`);
-  const hminus=h(`<button class="btn sm ghost" style="width:44px">−</button>`); hminus.onclick=()=>setHalfMin(hm-1);
-  const hval=h(`<div class="num" style="width:56px;text-align:center;font-weight:800">${hm} min</div>`);
-  const hplus=h(`<button class="btn sm ghost" style="width:44px">+</button>`); hplus.onclick=()=>setHalfMin(hm+1);
-  hctl.appendChild(hminus);hctl.appendChild(hval);hctl.appendChild(hplus);
-  hrow.appendChild(hctl); oc.appendChild(hrow);
   oc.appendChild(optRow('bigui','Larger buttons','Bigger tap targets for cold hands / gloves'));
   // Field orientation
   {
@@ -2057,8 +1990,7 @@ function renderTourney(){
       const g=rec.game; const st=deriveState(g.plays,g.settings);
       const ago=Math.max(0,Math.round((Date.now()-rec.updated)/1000));
       const situ=st.awaitingPAT?'Point after':`${st.down}${['st','nd','rd','th'][Math.min(st.down,4)-1]} & ${posLabel(g,st.spot,st.possession)}`;
-      const halfNum=g.clock?Math.max(1,Math.min(9,(+g.clock.half)||1)):0; // remote data: numeric-coerce before HTML
-      const clockTag=halfNum?(' · H'+halfNum+(g.clock.elapsed!=null?' '+fmtClock(Math.max(0,(+clockNow(g))||0)):'')):'';
+      const clockTag='';
       const fieldM=(g.name||'').match(/Field\s*(\d)/i);
       const fieldChip=fieldM?`<span class="liveFieldChip f${fieldM[1]}">FIELD ${fieldM[1]}</span>`:(g.name?`<span class="liveFieldChip">${esc(g.name.slice(0,18))}</span>`:'');
       const card=h(`<div class="liveCard">
@@ -2394,7 +2326,6 @@ async function deviceCheck(){
   R(missing.length?'fail':'ok','Team rosters',missing.length?('missing: '+missing.join(', ')):counts);
   // field filter + clock (info)
   R('ok','Field filter',(prefs.fieldFilter&&prefs.fieldFilter!=='all')?prefs.fieldFilter:'all games (hub)');
-  R(prefs.clock?'ok':'warn','Game clock',prefs.clock?('on · 2 × '+(prefs.halfMin||20)+' min'):'off');
   const icon=st=>st==='ok'?'<span style="color:var(--green)">✓</span>':st==='warn'?'<span style="color:var(--amber)">!</span>':'<span style="color:var(--red)">✗</span>';
   const html=rows.map(r=>`<div style="display:flex;gap:8px;margin:5px 0"><div style="width:14px">${icon(r.state)}</div><div><b>${esc(r.label)}</b>${r.detail?` — <span class="help" style="display:inline">${esc(r.detail)}</span>`:''}</div></div>`).join('');
   showModal({title:'Device check',body:html,buttons:[{label:'Close'}]});
