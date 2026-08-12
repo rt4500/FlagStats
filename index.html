@@ -331,7 +331,7 @@ function buildTestTeams(){
   const out={};
   for(const nation in TEST_POOLS){
     const {f,l}=TEST_POOLS[nation];
-    out[nation]={name:nation,players:TEST_NUMS.map((num,i)=>({id:uid(),num:String(num),name:f[i]+' '+l[i]}))};
+    out[nation]={name:nation,test:true,players:TEST_NUMS.map((num,i)=>({id:uid(),num:String(num),name:f[i]+' '+l[i]}))};
   }
   return out;
 }
@@ -1114,7 +1114,7 @@ function defenderRow(g,defSide){
   wrap.appendChild(playerPicker(rosterOf(g,defSide),ui.pending.flagPullBy,pid=>{ui.pending.flagPullBy=pid;commit();}));
   return wrap;
 }
-const APP_VERSION='v34';
+const APP_VERSION='v35';
 const IOC_CODES={'Switzerland':'SUI','Ireland':'IRL','Sweden':'SWE','Ukraine':'UKR','Poland':'POL','Czechia':'CZE','Finland':'FIN','Germany':'GER','Austria':'AUT','France':'FRA','Italy':'ITA','Great Britain':'GBR'};
 /* Flag color stripes per nation — lets a spotter recognize the end zone by color,
    not just by reading the label. Ordered top-to-bottom as on the real flag. */
@@ -1680,6 +1680,7 @@ function renderSetup(){
   addBtn.onclick=()=>editTeam(null);
   const seedBtn=h(`<button class="btn sm ghost">Load tournament teams</button>`);
   seedBtn.onclick=()=>{ loadTestTeams(); toast('Nations Cup teams loaded'); render(); };
+  tc.appendChild(h(`<div class="help" style="margin-bottom:6px">${Object.keys(realTeams()).length} of ${Object.keys(teams).length} squads are real (entered or pasted). Only those are published to the live page.</div>`));
   const shareTeamsBtn=h(`<button class="btn sm ghost">Share rosters</button>`);
   shareTeamsBtn.onclick=shareTeams;
   const pubBtn=h(`<button class="btn sm ghost">Publish (live)</button>`); pubBtn.onclick=publishRosters;
@@ -1722,7 +1723,7 @@ function buildTeamEditor(){
           const m2=l.match(/^#?(\d+)$/); if(m2) return {id:uid(),num:m2[1],name:''};
           return null; }).filter(Boolean);
         if(!players.length){ toast('No valid lines found'); return; }
-        cur.players=players; render(); toast(players.length+' players'); }},
+        cur.players=players; delete cur.test; persist(); render(); toast(players.length+' players'); }},
         {label:'Cancel'}]});
   };
   card.appendChild(pasteBtn);
@@ -2129,14 +2130,23 @@ async function deviceCheck(){
 function teamCodeName(n){ return (typeof IOC_CODES!=='undefined'&&IOC_CODES[n])||n.slice(0,3).toUpperCase(); }
 
 /* ---- ROSTERS VIA RELAY: publish once, every device pulls ---- */
+/* Only hand-entered / pasted squads count as real; generated test rosters are excluded
+   from publishing so placeholder names never appear on the public spectator page. */
+function realTeams(){
+  const out={};
+  for(const k in teams){ const t=teams[k];
+    if(t && !t.test && (t.players||[]).length) out[k]=t; }
+  return out;
+}
 async function publishRosters(){
   if(!LIVE_CONFIG.url||!writeCred()){ toast('Needs a keeper link'); return; }
   try{
     const q=writeKey?('?k='+encodeURIComponent(writeKey)):('?t='+encodeURIComponent(LIVE_CONFIG.token));
     const r=await fetch(LIVE_CONFIG.url.replace(/\/$/,'')+'/g/rosters'+q,{method:'PUT',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({type:'flagstats-teams',updated:Date.now(),teams})});
-    toast(r.ok?'Rosters published — other devices can now fetch them':'Publish failed ('+r.status+')');
+      body:JSON.stringify({type:'flagstats-teams',updated:Date.now(),teams:realTeams()})});
+    const n=Object.keys(realTeams()).length;
+    toast(r.ok?(n+' real squad(s) published — test rosters excluded'):'Publish failed ('+r.status+')');
   }catch(e){ toast('Publish failed — offline?'); }
 }
 async function fetchRostersLive(){

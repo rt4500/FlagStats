@@ -38,6 +38,7 @@
   td:first-child,th:first-child{text-align:left}
   td.num{font-family:var(--mono)}
   .teamHead{font-weight:800;font-size:12px;color:var(--amber);margin-top:10px}
+  .squadRow{padding:9px 4px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px;cursor:pointer}
   .empty{color:var(--muted);text-align:center;padding:30px 10px;font-size:13px}
   .status{font-size:10px;color:var(--muted);text-align:center;margin-top:8px}
   .err{color:var(--red);font-weight:700}
@@ -50,6 +51,7 @@
   <div class="sub">Women's Flag Football · live scores &amp; stats · updates automatically</div>
   <div id="games"><div class="empty">Waiting for live games…</div></div>
   <div id="tables"></div>
+  <div id="squads"></div>
   <div class="status" id="status" style="cursor:pointer" title="Tap to refresh" onclick="poll()"></div>
 </div>
 <script>
@@ -168,7 +170,7 @@ function posLabel(g,yard,off){ const L=g.settings.fieldLength, mid=g.settings.mi
   if(yard===mid) return 'midfield'; if(yard<mid) return teamCode(g,off)+' '+yard; return teamCode(g,def)+' '+(L-yard); }
 function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
-let live={}, expand={};
+let live={}, expand={}, rosters={updated:0,teams:null}, rosterOpen={};
 function applyTheme(light){
   document.documentElement.setAttribute('data-theme', light?'light':'dark');
   const mc=document.querySelector('meta[name="theme-color"]'); if(mc) mc.setAttribute('content', light?'#EEF1F5':'#14171C');
@@ -236,6 +238,7 @@ function render(){
   });
   }
   renderTables();
+  renderSquads();
 }
 
 /* ---- Standings · Leaders · Bracket (from all received games) ---- */
@@ -270,6 +273,34 @@ function leaderRows(){
     });
   });
   return Object.values(agg);
+}
+function renderSquads(){
+  const root=document.getElementById('squads'); if(!root) return;
+  const t=rosters.teams;
+  if(!t){ root.innerHTML=''; return; }
+  const names=Object.keys(t).filter(k=>{
+    if(k==='__proto__'||k==='constructor'||k==='prototype') return false;
+    const tm=t[k];
+    return tm && !tm.test && Array.isArray(tm.players) && tm.players.length; // real squads only
+  }).sort();
+  if(!names.length){ root.innerHTML=''; return; }
+  let html='<div class="card"><div class="teamHead" style="margin-top:0">Squads ('+names.length+')</div>';
+  names.forEach(n=>{
+    const players=t[n].players.slice().sort((a,b)=>(parseInt(a.num,10)||999)-(parseInt(b.num,10)||999));
+    html+='<div class="squadRow" data-team="'+esc(n)+'">'+esc(n)+
+      ' <span style="color:var(--muted);font-weight:400">'+players.length+' players</span>'+
+      '<span style="float:right;color:var(--amber)">'+(rosterOpen[n]?'▴':'▾')+'</span></div>';
+    if(rosterOpen[n]){
+      html+='<table><tbody>';
+      players.forEach(p=>{ html+='<tr><td style="width:38px" class="num">#'+esc(p.num)+'</td><td>'+esc(p.name||'')+'</td></tr>'; });
+      html+='</tbody></table>';
+    }
+  });
+  html+='</div>';
+  root.innerHTML=html;
+  root.querySelectorAll('.squadRow').forEach(el=>{
+    el.onclick=()=>{ const n=el.getAttribute('data-team'); rosterOpen[n]=!rosterOpen[n]; renderSquads(); };
+  });
 }
 function renderTables(){
   const root=document.getElementById('tables'); if(!root) return;
@@ -325,7 +356,12 @@ async function poll(){
     if(r.status===403&&LIVE_CONFIG.token){ r=await fetch(LIVE_CONFIG.url.replace(/\/$/,'')+'/g?t='+encodeURIComponent(LIVE_CONFIG.token),{cache:'no-store'}); }
     if(!r.ok){ el.innerHTML='<span class="err">connection problem ('+r.status+')</span>'; return; }
     const arr=await r.json();
-    if(Array.isArray(arr)){ arr.forEach(rec=>{ if(!rec||!rec.game) return;
+    if(Array.isArray(arr)){ arr.forEach(rec=>{ if(!rec) return;
+        // published squad lists (only real, hand-entered rosters are ever published)
+        if(rec.type==='flagstats-teams' && rec.teams){
+          if(!rosters.updated || (rec.updated||0)>=rosters.updated){ rosters={updated:rec.updated||0,teams:rec.teams}; }
+          return; }
+        if(!rec.game) return;
         const k=String(rec.game.id||rec.device||''); if(!k||k==='__proto__'||k==='constructor'||k==='prototype') return;
         live[k]=rec; });
       el.textContent='last update '+new Date().toLocaleTimeString(); render(); }
