@@ -1114,7 +1114,7 @@ function defenderRow(g,defSide){
   wrap.appendChild(playerPicker(rosterOf(g,defSide),ui.pending.flagPullBy,pid=>{ui.pending.flagPullBy=pid;commit();}));
   return wrap;
 }
-const APP_VERSION='v35';
+const APP_VERSION='v36';
 const IOC_CODES={'Switzerland':'SUI','Ireland':'IRL','Sweden':'SWE','Ukraine':'UKR','Poland':'POL','Czechia':'CZE','Finland':'FIN','Germany':'GER','Austria':'AUT','France':'FRA','Italy':'ITA','Great Britain':'GBR'};
 /* Flag color stripes per nation — lets a spotter recognize the end zone by color,
    not just by reading the label. Ordered top-to-bottom as on the real flag. */
@@ -1863,7 +1863,7 @@ function renderTourney(){
   clr.onclick=()=>{ const localIds=new Set(games.map(g=>g.id)); tourneyGames=tourneyGames.filter(g=>localIds.has(g.id)); render(); };
   imp.appendChild(fileBtn);imp.appendChild(useLocal);imp.appendChild(clr);imp.appendChild(input);
   card.appendChild(imp);
-  card.appendChild(h(`<div class="help" style="margin-top:8px">${tourneyGames.length} game(s) in the roll-up${autoAdded?` (${autoAdded} from this device)`:''}.</div>`));
+  card.appendChild(h(`<div class="help" style="margin-top:8px">${tourneyGames.length} game(s) in the roll-up${autoAdded?` (${autoAdded} from this device)`:''} · App ${APP_VERSION}</div>`));
   root.appendChild(card);
 
   if(!tourneyGames.length) return;
