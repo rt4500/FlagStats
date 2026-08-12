@@ -1114,7 +1114,7 @@ function defenderRow(g,defSide){
   wrap.appendChild(playerPicker(rosterOf(g,defSide),ui.pending.flagPullBy,pid=>{ui.pending.flagPullBy=pid;commit();}));
   return wrap;
 }
-const APP_VERSION='v38';
+const APP_VERSION='v39';
 const IOC_CODES={'Switzerland':'SUI','Ireland':'IRL','Sweden':'SWE','Ukraine':'UKR','Poland':'POL','Czechia':'CZE','Finland':'FIN','Germany':'GER','Austria':'AUT','France':'FRA','Italy':'ITA','Great Britain':'GBR'};
 /* Flag color stripes per nation — lets a spotter recognize the end zone by color,
    not just by reading the label. Ordered top-to-bottom as on the real flag. */
@@ -1552,17 +1552,25 @@ function renderSetup(){
       const played=g.plays.length>0;
       const unexported=played && g.exportedPlays!==g.plays.length;
       const gst2=played?deriveState(g.plays,g.settings):null;
+      const confirmTwice=()=>showModal({
+        title:'Really delete?',
+        body:`Final check: <b>${esc(g.teams.home.name)} vs ${esc(g.teams.away.name)}</b>${gst2?` · ${gst2.home}–${gst2.away}`:''}`,
+        warn:'A backup file is saved and the game stays restorable on this device.',
+        buttons:[{label:'Delete game',cls:'red',onTap:()=>doDeleteGame(g.id)},{label:'Cancel'}]});
       showModal({
         title:'Delete this game?',
         body:`${esc(g.teams.home.name)} vs ${esc(g.teams.away.name)}${gst2?` · <b class="num">${gst2.home}–${gst2.away}</b> · ${g.plays.length} plays`:' · not played'}`,
-        warn: unexported ? 'This game has plays that were NOT exported. Deleting loses them permanently.' :
-              (played ? 'Deleting removes it from this device permanently.' : null),
-        buttons: unexported ? [
+        warn: unexported ? 'This game has plays that were NOT exported.' :
+              (played ? 'Deleting removes it from this device.' : null),
+        buttons: !played ? [
+            {label:'Delete',cls:'red',onTap:()=>doDeleteGame(g.id)},
+            {label:'Cancel'}
+          ] : unexported ? [
             {label:'Export first',cls:'blue',onTap:()=>{exportGame(g);toast('Exported — tap ✕ again to delete');}},
-            {label:'Delete anyway',cls:'red',onTap:()=>doDeleteGame(g.id)},
+            {label:'Continue…',cls:'red',onTap:confirmTwice},
             {label:'Cancel'}
           ] : [
-            {label:'Delete',cls:'red',onTap:()=>doDeleteGame(g.id)},
+            {label:'Continue…',cls:'red',onTap:confirmTwice},
             {label:'Cancel'}
           ]
       });
@@ -1570,6 +1578,24 @@ function renderSetup(){
     btns.appendChild(use);btns.appendChild(ex);btns.appendChild(sh);btns.appendChild(del);
     item.appendChild(btns); gc.appendChild(item);
   });
+  // reset + restore (testing / recovery)
+  const dz=h(`<div class="flexbtns" style="margin-top:8px"></div>`);
+  if(games.length){
+    const rst=h(`<button class="btn sm ghost" style="color:var(--red)">Reset all games…</button>`);
+    rst.onclick=resetAllGames; dz.appendChild(rst);
+  }
+  const tr=loadTrash();
+  if(tr&&tr.games.length){
+    const rb=h(`<button class="btn sm amber">↺ Restore ${tr.games.length} deleted</button>`);
+    rb.onclick=()=>showModal({title:'Restore deleted games?',
+      body:`${tr.games.length} game(s) from ${new Date(tr.when).toLocaleString()}${tr.label?`<br><span class="help">${esc(tr.label)}</span>`:''}`,
+      buttons:[{label:'Restore',cls:'green',onTap:restoreTrash},
+               {label:'Discard backup',cls:'ghost',onTap:()=>{store.save(LS_TRASH,null);render();toast('Backup discarded');}},
+               {label:'Cancel'}]});
+    dz.appendChild(rb);
+  }
+  if(dz.childNodes.length) gc.appendChild(dz);
+
   // end-of-day bundle
   if(games.some(g=>g.plays.length>0)){
     const bundleBtn=h(`<button class="btn sm green" style="margin-top:6px;width:100%">Export ALL played games (one file)</button>`);
@@ -1708,7 +1734,61 @@ function renderSetup(){
   if(editingTeam!==undefined) root.appendChild(buildTeamEditor());
 }
 
-function doDeleteGame(id){ games=games.filter(x=>x.id!==id); if(activeId===id)activeId=games[0]?.id||null; persist(); render(); toast('Game deleted'); }
+/* ---- Deletion safety net ----
+   Every delete first (a) writes a downloadable backup file and (b) keeps a copy in a
+   local "recycle bin", so a wrong tap is always recoverable — by one-tap Restore, or
+   by re-importing the file if the device is wiped. */
+const LS_TRASH='fs_trash';
+function loadTrash(){ const t=store.load(LS_TRASH,null); return (t&&Array.isArray(t.games))?t:null; }
+function saveTrash(gamesArr,label){
+  try{ store.save(LS_TRASH,{when:Date.now(),label:label||'',games:JSON.parse(JSON.stringify(gamesArr))}); }
+  catch(e){ /* storage full: the downloaded backup file is still the fallback */ }
+}
+function backupFile(gamesArr,tag){
+  if(!gamesArr.length) return;
+  const bundle={type:'flagstats-bundle',exported:new Date().toISOString(),reason:'pre-delete backup',games:gamesArr};
+  downloadBlob(JSON.stringify(bundle),'flagstats-backup_'+(tag||'delete')+'_'+new Date().toISOString().slice(0,16).replace(/[:T]/g,'-')+'.json','application/json');
+}
+function restoreTrash(){
+  const t=loadTrash(); if(!t||!t.games.length){ toast('Nothing to restore'); return; }
+  let n=0;
+  t.games.forEach(g=>{ if(!games.some(x=>x.id===g.id)){ games.push(g); n++; } });
+  store.save(LS_TRASH,null); persist(); render();
+  toast(n?(n+' game(s) restored'):'Those games are already here');
+}
+function doDeleteGame(id){
+  const g=games.find(x=>x.id===id);
+  if(g && g.plays && g.plays.length && !g.practice){ saveTrash([g],(g.teams.home.name+' vs '+g.teams.away.name)); backupFile([g],'game'); }
+  games=games.filter(x=>x.id!==id); if(activeId===id)activeId=games[0]?.id||null;
+  persist(); render(); toast('Game deleted — Restore available');
+}
+/* Reset every game on this device (testing / fresh start), with backup + double confirm */
+function resetAllGames(){
+  const played=games.filter(g=>g.plays&&g.plays.length&&!g.practice);
+  const total=games.length;
+  if(!total){ toast('No games to reset'); return; }
+  showModal({
+    title:'Reset ALL games on this device?',
+    body:`This removes <b>${total}</b> game(s)${played.length?`, of which <b>${played.length}</b> contain logged plays`:' (none played yet)'}.<br><br>Teams, rosters and settings are kept.`,
+    warn: played.length?'A backup file will be downloaded first, and the games stay restorable on this device.':null,
+    buttons:[
+      {label:'Continue…',cls:'red',onTap:()=>{
+        if(played.length) backupFile(played,'reset');
+        showModal({
+          title:'Really delete them?',
+          body:`Second and final check: <b>${total}</b> game(s) will be removed from this device.`,
+          warn:'Tap Delete only if you are sure.',
+          buttons:[
+            {label:'Delete all games',cls:'red',onTap:()=>{
+              saveTrash(games.slice(),'reset of '+total+' game(s)');
+              games=[]; activeId=null; persist(); render();
+              toast(total+' game(s) deleted — Restore available'); }},
+            {label:'Cancel'}
+          ]});
+      }},
+      {label:'Cancel'}
+    ]});
+}
 let editingTeam; // teamName or null (new) or undefined (closed)
 function editTeam(tn){ editingTeam=tn; render(); }
 function buildTeamEditor(){
