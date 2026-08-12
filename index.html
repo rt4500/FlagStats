@@ -72,12 +72,11 @@
   .field{position:relative;flex:0 0 clamp(100px,32vw,164px);height:clamp(360px,58vh,600px);background:
     repeating-linear-gradient(0deg,var(--green-d) 0 8px,#125a37 8px 16px);
     border:1px solid var(--line);border-radius:12px;overflow:hidden;touch-action:none;cursor:crosshair}
-  .ez{position:absolute;left:0;right:0;height:9%;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .ez{position:absolute;left:0;right:0;height:9%;display:flex;align-items:center;justify-content:flex-end;padding-right:8px;overflow:hidden}
   .ez.top{top:0}.ez.bot{bottom:0}
-  .ezFlag{position:absolute;inset:0;display:flex;flex-direction:column;opacity:.85}
-  .ezFlag span{display:block}
+  .ezFlag{position:absolute;inset:0;opacity:.9;background-size:cover}
   .ezLabel{position:relative;z-index:2;font-size:11px;letter-spacing:.12em;font-weight:800;
-    color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.9),0 0 3px rgba(0,0,0,.7);padding:1px 6px}
+    color:#fff;background:rgba(0,0,0,.5);border-radius:5px;padding:1px 7px}
   .ytick{position:absolute;left:0;right:0;height:0;border-top:1px solid rgba(255,255,255,.18)}
   .ytick.mid{border-top:2px dashed rgba(242,177,56,.8)}
   .ynum{position:absolute;left:3px;font-size:8px;color:rgba(255,255,255,.55);font-family:var(--mono);transform:translateY(-50%)}
@@ -372,6 +371,21 @@ const NC_SCHEDULE=[
 // 10:15 F2 RR5-7: L QF2 v L QF3 · 11:30 F1 SF1: W QF1 v W QF2 · 11:30 F2 SF2: W QF3 v W QF4
 // 12:45 F2 RR5-7: L QF3 v L QF4 · 14:00 F1 3rd place: L SF1 v L SF2 · 14:00 F2 RR5-7: L QF4 v L QF2
 // 15:15 F1 Final: W SF1 v W SF2
+/* Late squads (e.g. Ukraine): fixtures snapshot rosters at creation, so games made
+   before a real roster arrived still carry placeholder names. This refreshes every
+   UNPLAYED game from the current team library — played games are never touched. */
+function refreshRostersInUnplayedGames(){
+  let n=0;
+  games.forEach(g=>{
+    if(g.plays.length || g.practice) return;
+    ['home','away'].forEach(side=>{
+      const t=teams[g.teams[side].name];
+      if(t && t.players){ g.teams[side].players=t.players.map(p=>({...p})); n++; }
+    });
+  });
+  persist(); render();
+  toast(n?('Rosters refreshed in unplayed games'):'No unplayed games to update');
+}
 function loadSchedule(){
   loadTestTeams(); // make sure all seven teams exist
   const clone=(n)=>({name:n,players:teams[n].players.map(p=>({...p}))});
@@ -703,8 +717,8 @@ function finishGame(g){
     title:'Finish game?',
     body:`Final: <b>${esc(g.teams.home.name)} <span class="num">${st.home}–${st.away}</span> ${esc(g.teams.away.name)}</b> · ${g.plays.length} plays.<br>Finishing closes the game for logging (you can reopen it).`,
     buttons:[
-      {label:'Share + finish',cls:'green',onTap:()=>{ shareGame(g); g.finished=true; persist(); render(); toast('Game finished'); }},
-      {label:'Finish only',cls:'amber',onTap:()=>{ g.finished=true; persist(); render(); toast('Game finished'); }},
+      {label:'Share + finish',cls:'green',onTap:()=>{ shareGame(g); g.finished=true; persist(); render(); toast('Game finished'); pushActive(g); }},
+      {label:'Finish only',cls:'amber',onTap:()=>{ g.finished=true; persist(); render(); toast('Game finished'); pushActive(g); }},
       {label:'Cancel'}
     ]});
 }
@@ -1114,27 +1128,40 @@ function defenderRow(g,defSide){
   wrap.appendChild(playerPicker(rosterOf(g,defSide),ui.pending.flagPullBy,pid=>{ui.pending.flagPullBy=pid;commit();}));
   return wrap;
 }
-const APP_VERSION='v43';
+const APP_VERSION='v47';
 const IOC_CODES={'Switzerland':'SUI','Ireland':'IRL','Sweden':'SWE','Ukraine':'UKR','Poland':'POL','Czechia':'CZE','Finland':'FIN','Germany':'GER','Austria':'AUT','France':'FRA','Italy':'ITA','Great Britain':'GBR'};
 /* Flag color stripes per nation — lets a spotter recognize the end zone by color,
    not just by reading the label. Ordered top-to-bottom as on the real flag. */
-const FLAG_COLORS={
-  'Switzerland':['#D52B1E','#FFFFFF'], 'Ireland':['#169B62','#FFFFFF','#FF883E'],
-  'Sweden':['#006AA7','#FECC00'], 'Ukraine':['#0057B7','#FFD700'],
-  'Poland':['#FFFFFF','#DC143C'], 'Czechia':['#11457E','#D7141A','#FFFFFF'],
-  'Finland':['#FFFFFF','#003580'], 'Germany':['#000000','#DD0000','#FFCE00'],
-  'Austria':['#ED2939','#FFFFFF'], 'France':['#0055A4','#FFFFFF','#EF4135'],
-  'Italy':['#009246','#FFFFFF','#CE2B37'], 'Great Britain':['#012169','#FFFFFF','#C8102E'] };
-function flagColors(name){ return FLAG_COLORS[name]||['#3a4550','#2a333d']; }
+/* Real flag STRUCTURE, not just colours — Sweden (Nordic cross) and Ukraine
+   (horizontal bands) share the same two colours, so stripes alone made them
+   look identical. Layout is what makes them tellable apart at a glance. */
+const FLAG_CSS={
+  // Nordic crosses (classic gradient syntax — works on every browser engine)
+  'Sweden':'linear-gradient(90deg,transparent 22%,#FECC00 22%,#FECC00 34%,transparent 34%),linear-gradient(180deg,transparent 36%,#FECC00 36%,#FECC00 64%,transparent 64%),linear-gradient(#006AA7,#006AA7)',
+  'Finland':'linear-gradient(90deg,transparent 22%,#003580 22%,#003580 34%,transparent 34%),linear-gradient(180deg,transparent 36%,#003580 36%,#003580 64%,transparent 64%),linear-gradient(#FFFFFF,#FFFFFF)',
+  // Swiss cross
+  // Swiss cross: a compact, FREE-STANDING cross (arms must not reach the edges —
+  // an edge-to-edge white cross on red is the Danish flag, not the Swiss one).
+  'Switzerland':'linear-gradient(#FFFFFF,#FFFFFF) center/5% 58% no-repeat,linear-gradient(#FFFFFF,#FFFFFF) center/15% 19% no-repeat,linear-gradient(#D52B1E,#D52B1E)',
+  // horizontal bands
+  'Ukraine':'linear-gradient(180deg,#0057B7 50%,#FFD700 50%)',
+  'Poland':'linear-gradient(180deg,#FFFFFF 50%,#DC143C 50%)',
+  'Germany':'linear-gradient(180deg,#000000 33.3%,#DD0000 33.3%,#DD0000 66.6%,#FFCE00 66.6%)',
+  'Austria':'linear-gradient(180deg,#ED2939 33.3%,#FFFFFF 33.3%,#FFFFFF 66.6%,#ED2939 66.6%)',
+  // vertical tricolours
+  'Ireland':'linear-gradient(90deg,#169B62 33.3%,#FFFFFF 33.3%,#FFFFFF 66.6%,#FF883E 66.6%)',
+  'France':'linear-gradient(90deg,#0055A4 33.3%,#FFFFFF 33.3%,#FFFFFF 66.6%,#EF4135 66.6%)',
+  'Italy':'linear-gradient(90deg,#009246 33.3%,#FFFFFF 33.3%,#FFFFFF 66.6%,#CE2B37 66.6%)',
+  // white/red with blue wedge
+  'Czechia':'linear-gradient(120deg,#11457E 26%,transparent 26%),linear-gradient(180deg,#FFFFFF 50%,#D7141A 50%)'
+};
+function flagCss(name){ return FLAG_CSS[name]||'repeating-linear-gradient(45deg,#3a4550 0 8px,#2a333d 8px 16px)'; }
 function buildFieldEndzones(g,f,topSide,bottomSide){
   const mk=(side,pos)=>{
     const name=g.teams[side].name;
-    const cols=flagColors(name);
-    const stripes=cols.map(c=>`<span style="flex:1;background:${c}"></span>`).join('');
-    const code=teamCode(g,side);
     return `<div class="ez ${pos}">
-      <div class="ezFlag">${stripes}</div>
-      <span class="ezLabel">${esc(code)}</span>
+      <div class="ezFlag" style="background:${flagCss(name)}"></div>
+      <span class="ezLabel">${esc(teamCode(g,side))}</span>
     </div>`;
   };
   f.appendChild(h(mk(topSide,'top')));
@@ -1543,7 +1570,9 @@ function renderSetup(){
       <div class="meta" style="font-size:11px;color:var(--muted)">${esc(g.name||'')} · ${status}</div></div></div>`);
     const btns=h(`<div class="flexbtns"></div>`);
     const use=h(`<button class="btn sm ${g.id===activeId?'amber':'ghost'}">${g.id===activeId?'Active':'Open'}</button>`);
-    use.onclick=()=>{activeId=g.id;ui={step:'idle',pending:null};persist();switchTab('game');};
+    use.onclick=()=>{ const prev=activeGame(); activeId=g.id; ui={step:'idle',pending:null}; persist();
+      if(prev && prev.id!==g.id && prev.plays.length && !prev.practice) pushActive(prev); // flush last state
+      switchTab('game'); };
     const ex=h(`<button class="btn sm ghost">Export</button>`); ex.onclick=()=>exportGame(g);
     const sh=h(`<button class="btn sm ghost">Share</button>`); sh.onclick=()=>shareGame(g);
     const rs=h(`<button class="btn sm ghost" style="color:var(--amber)" title="Clear plays, keep the fixture">↺ Reset</button>`);
@@ -1587,6 +1616,10 @@ function renderSetup(){
   if(games.length){
     const rst=h(`<button class="btn sm ghost" style="color:var(--red)">Reset all games…</button>`);
     rst.onclick=resetAllGames; dz.appendChild(rst);
+  }
+  if(games.some(g=>!g.plays.length&&!g.practice)){
+    const rr=h(`<button class="btn sm ghost">Refresh rosters in unplayed games</button>`);
+    rr.onclick=refreshRostersInUnplayedGames; dz.appendChild(rr);
   }
   if(LIVE_CONFIG.url){
     const cb=h(`<button class="btn sm ghost">Clean live server…</button>`);
@@ -1826,6 +1859,8 @@ function restoreOne(entry){
   const t=loadTrash();
   if(t){ t.games=t.games.filter(e=>!(e._at===entry._at && e.game.id===g.id)); store.save(LS_TRASH,t); }
   persist(); render(); toast('Restored: '+g.teams.home.name+' vs '+g.teams.away.name);
+  const back=games.find(x=>x.id===g.id);
+  if(back && back.plays.length && !back.practice) pushActive(back); // put it back on the live page too
   return true;
 }
 function backupFile(gamesArr,tag){
@@ -1844,6 +1879,7 @@ function restoreTrash(){
   });
   store.save(LS_TRASH,null); persist(); render();
   toast(n?(n+' game(s) restored'):'Nothing needed restoring');
+  games.forEach(g=>{ if(g.plays.length && !g.practice) pushActive(g); }); // live page relearns them
 }
 /* Picker: choose exactly which deleted/reset games to bring back */
 function openRestoreMenu(){
@@ -2058,8 +2094,12 @@ function renderTourney(){
   // Auto-include this device's own played (non-practice) games so standings/leaders
   // work with zero taps. Deduped by id, so importing or live-loading won't double them.
   let autoAdded=0;
-  games.forEach(g=>{ if(!g.practice && g.plays && g.plays.length && !tourneyGames.some(x=>x.id===g.id)){
-    tourneyGames.push(JSON.parse(JSON.stringify(g))); autoAdded++; } });
+  games.forEach(g=>{ if(g.practice || !g.plays || !g.plays.length) return;
+    const i=tourneyGames.findIndex(x=>x.id===g.id);
+    const copy=JSON.parse(JSON.stringify(g));
+    if(i<0){ tourneyGames.push(copy); } else { tourneyGames[i]=copy; } // stay in step with live logging
+    autoAdded++;
+  });
 
   const card=h(`<div class="card"><h3>Tournament roll-up</h3>
     <div class="help">Your own games on this device are included automatically. Use the buttons below only to add the <b>other</b> field's games (exported JSON or the live server). Player stats combine by team + jersey number.</div></div>`);
@@ -2226,8 +2266,8 @@ function schedulePush(){
   updateSyncChip('pending');
   syncTimer=setTimeout(pushActive, wait);
 }
-async function pushActive(){
-  const g=activeGame(); if(!g||!syncConfigured()) return;
+async function pushActive(gameArg){
+  const g=gameArg||activeGame(); if(!g||!syncConfigured()) return;
   if(g.practice) return; // practice games never broadcast
   if(!g.plays.length){ return; } // nothing to broadcast — keeps viewer devices silent
   lastPush=Date.now();
