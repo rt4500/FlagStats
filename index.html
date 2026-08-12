@@ -1114,7 +1114,7 @@ function defenderRow(g,defSide){
   wrap.appendChild(playerPicker(rosterOf(g,defSide),ui.pending.flagPullBy,pid=>{ui.pending.flagPullBy=pid;commit();}));
   return wrap;
 }
-const APP_VERSION='v42';
+const APP_VERSION='v43';
 const IOC_CODES={'Switzerland':'SUI','Ireland':'IRL','Sweden':'SWE','Ukraine':'UKR','Poland':'POL','Czechia':'CZE','Finland':'FIN','Germany':'GER','Austria':'AUT','France':'FRA','Italy':'ITA','Great Britain':'GBR'};
 /* Flag color stripes per nation — lets a spotter recognize the end zone by color,
    not just by reading the label. Ordered top-to-bottom as on the real flag. */
@@ -1546,7 +1546,7 @@ function renderSetup(){
     use.onclick=()=>{activeId=g.id;ui={step:'idle',pending:null};persist();switchTab('game');};
     const ex=h(`<button class="btn sm ghost">Export</button>`); ex.onclick=()=>exportGame(g);
     const sh=h(`<button class="btn sm ghost">Share</button>`); sh.onclick=()=>shareGame(g);
-    const rs=h(`<button class="btn sm ghost" title="Clear plays, keep the fixture">↺</button>`);
+    const rs=h(`<button class="btn sm ghost" style="color:var(--amber)" title="Clear plays, keep the fixture">↺ Reset</button>`);
     rs.onclick=()=>resetGamePlays(g);
     const del=h(`<button class="btn sm ghost">✕</button>`); del.onclick=()=>{
       if(g.practice){ showModal({title:'Delete practice game?',body:'Nothing from it is kept or broadcast.',
