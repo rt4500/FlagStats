@@ -409,7 +409,8 @@ function deriveState(plays,s){
   let home=0,away=0,possession='home',spot=s.startYardLine,down=1;
   let seriesCrossedMid=false,awaitingPAT=false,patTeam=null;
   const add=(t,n)=>{t==='home'?home+=n:away+=n;};
-  const flip=(end)=>{possession=possession==='home'?'away':'home';spot=Math.max(0,Math.min(s.fieldLength,s.fieldLength-end));down=1;seriesCrossedMid=false;};
+  // IFAF flag: EVERY change of possession except an interception return starts the
+  // new offense at their own startYardLine (5) — including turnover on downs.
   const newPoss=()=>{possession=possession==='home'?'away':'home';spot=s.startYardLine;down=1;seriesCrossedMid=false;};
   for(const p of plays){
     if(p.type==='pat'){ if(awaitingPAT&&patTeam&&p.pat&&p.pat.good) add(patTeam,p.pat.type==='2'?2:1);
@@ -431,7 +432,7 @@ function deriveState(plays,s){
       // per series: being pushed back behind midline does NOT reset it.
       if(!seriesCrossedMid && spot>=s.midfield){ seriesCrossedMid=true; down=1; }
       if(p.penalty.autoFirst) down=1;
-      if(p.penalty.lossOfDown){ down+=1; if(down>s.downsPerSeries) flip(spot); }
+      if(p.penalty.lossOfDown){ down+=1; if(down>s.downsPerSeries) newPoss(); }
       continue; }
     const start=(typeof p.startSpot==='number')?p.startSpot:spot;
     let end=(typeof p.endSpot==='number')?p.endSpot:start;
@@ -445,7 +446,7 @@ function deriveState(plays,s){
     if(p.touchdown||end>=s.fieldLength){ add(possession,6); awaitingPAT=true; patTeam=possession; continue; }
     spot=Math.max(0,Math.min(s.fieldLength,end));
     if(!seriesCrossedMid&&spot>=s.midfield){ seriesCrossedMid=true; down=1; }
-    else{ down+=1; if(down>s.downsPerSeries) flip(spot); }
+    else{ down+=1; if(down>s.downsPerSeries) newPoss(); }
   }
   const target=seriesCrossedMid?s.fieldLength:s.midfield;
   return{home,away,possession,spot,down,seriesCrossedMid,target,distance:Math.max(0,target-spot),awaitingPAT,patTeam};
@@ -1072,7 +1073,7 @@ function defenderRow(g,defSide){
   wrap.appendChild(playerPicker(rosterOf(g,defSide),ui.pending.flagPullBy,pid=>{ui.pending.flagPullBy=pid;commit();}));
   return wrap;
 }
-const APP_VERSION='v51';
+const APP_VERSION='v52';
 const IOC_CODES={'Switzerland':'SUI','Ireland':'IRL','Sweden':'SWE','Ukraine':'UKR','Poland':'POL','Czechia':'CZE','Finland':'FIN','Germany':'GER','Austria':'AUT','France':'FRA','Italy':'ITA','Great Britain':'GBR'};
 /* Flag color stripes per nation — lets a spotter recognize the end zone by color,
    not just by reading the label. Ordered top-to-bottom as on the real flag. */
