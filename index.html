@@ -1073,7 +1073,7 @@ function defenderRow(g,defSide){
   wrap.appendChild(playerPicker(rosterOf(g,defSide),ui.pending.flagPullBy,pid=>{ui.pending.flagPullBy=pid;commit();}));
   return wrap;
 }
-const APP_VERSION='v52';
+const APP_VERSION='v54';
 const IOC_CODES={'Switzerland':'SUI','Ireland':'IRL','Sweden':'SWE','Ukraine':'UKR','Poland':'POL','Czechia':'CZE','Finland':'FIN','Germany':'GER','Austria':'AUT','France':'FRA','Italy':'ITA','Great Britain':'GBR'};
 /* Flag color stripes per nation — lets a spotter recognize the end zone by color,
    not just by reading the label. Ordered top-to-bottom as on the real flag. */
@@ -1473,6 +1473,46 @@ function buildBoxScore(g){
 function renderSetup(){
   const root=document.getElementById('view-setup');
   root.innerHTML='';
+
+  // ADMIN — live server corrections (visible only with an admin keeper key)
+  if(adminRole==='admin'){
+    const ac=h(`<div class="card"><h3>Admin · live server</h3>
+      <div class="help">Visible because this device\u2019s key has the <b>admin</b> role. Deletes here affect only the public live display, never any device\u2019s local games.</div></div>`);
+    const listBtn=h(`<button class="btn sm blue">Load server entries</button>`);
+    const wrap=h(`<div style="margin-top:8px"></div>`);
+    listBtn.onclick=async()=>{
+      wrap.innerHTML='<div class="help">Loading…</div>';
+      let recs=[];
+      try{
+        const r=await fetch(LIVE_CONFIG.url.replace(/\/$/,'')+'/g',{cache:'no-store'});
+        const arr=await r.json();
+        recs=(Array.isArray(arr)?arr:[]).filter(x=>x&&x.game&&x._slot);
+      }catch(e){ wrap.innerHTML='<div class="help" style="color:var(--red)">Could not reach server</div>'; return; }
+      wrap.innerHTML='';
+      if(!recs.length){ wrap.appendChild(h('<div class="help">Server is empty.</div>')); return; }
+      recs.sort((a,b)=>(b.updated||0)-(a.updated||0)).forEach(rec=>{
+        const g=rec.game, st=deriveState(g.plays||[],g.settings||defaultSettings());
+        const ns=String(rec._slot).split(':')[1]||'?';
+        const row=h(`<div class="teamRow"><div style="flex:1;min-width:0">
+          <div style="font-weight:800">${esc(g.teams.home.name)} ${st.home}–${st.away} ${esc(g.teams.away.name)}${g.finished?'<span class="finalBadge">FINAL</span>':''}</div>
+          <div class="meta">${esc(g.name||'no label')} · ${(g.plays||[]).length} plays · from <b>${esc(ns)}</b></div>
+        </div></div>`);
+        const del=h(`<button class="btn sm ghost" style="color:var(--red)">✕</button>`);
+        del.onclick=()=>showModal({title:'Remove from live display?',
+          body:`${esc(g.teams.home.name)} vs ${esc(g.teams.away.name)} · broadcast by <b>${esc(ns)}</b>`,
+          warn:'The device that logged it keeps its local copy.',
+          buttons:[{label:'Remove',cls:'red',onTap:async()=>{
+            try{
+              const r=await fetch(LIVE_CONFIG.url.replace(/\/$/,'')+'/g/admin?k='+encodeURIComponent(writeKey)+'&slot='+encodeURIComponent(rec._slot),{method:'DELETE'});
+              toast(r.ok?'Removed':'Failed ('+r.status+')');
+            }catch(e){ toast('Failed — offline?'); }
+            liveGames={}; fetchLive(true); listBtn.onclick();
+          }},{label:'Cancel'}]});
+        row.appendChild(del); wrap.appendChild(row);
+      });
+    };
+    ac.appendChild(listBtn); ac.appendChild(wrap); root.appendChild(ac);
+  }
 
   // TOURNAMENT READINESS
   const rc=h(`<div class="card"><h3>Tournament readiness</h3></div>`);
@@ -1975,6 +2015,32 @@ function buildTeamEditor(){
    RENDER: TOURNAMENT (merge exported games)
    ============================================================ */
 let tourneyGames=[]; // imported game objects
+/* Duplicate copies of the same fixture (two devices logged the same real-world game)
+   must count ONCE. Key: fixture label + team pair. Among finished duplicates the copy
+   with the most plays wins — it is the more complete record. */
+function dedupeFixtures(list){
+  const byKey={}, order=[];
+  list.forEach(g=>{
+    const key=(g.name||'')+'|'+g.teams.home.name+'|'+g.teams.away.name;
+    if(!byKey[key]){ byKey[key]=g; order.push(key); return; }
+    const cur=byKey[key];
+    // prefer finished over unfinished; then more plays
+    const better=(a,b)=>{ if(!!a.finished!==!!b.finished) return a.finished?a:b;
+      return (a.plays.length>=b.plays.length)?a:b; };
+    byKey[key]=better(cur,g);
+  });
+  const games=order.map(k=>byKey[k]);
+  return {games,dupes:list.length-games.length};
+}
+let adminRole=null; // set by roleProbe() when a keeper link is present
+async function roleProbe(){
+  if(!LIVE_CONFIG.url||!writeKey) return;
+  try{
+    const r=await fetch(LIVE_CONFIG.url.replace(/\/$/,'')+'/ping?k='+encodeURIComponent(writeKey),{cache:'no-store'});
+    const j=await r.json(); adminRole=(j&&j.ok)?j.role:null;
+    if(adminRole==='admin') render();
+  }catch(e){}
+}
 function renderTourney(){
   const root=document.getElementById('view-tourney');
   root.innerHTML='';
@@ -1988,7 +2054,8 @@ function renderTourney(){
       const fa=a[1].game.finished?1:0, fb=b[1].game.finished?1:0;
       if(fa!==fb) return fa-fb;
       return b[1].updated-a[1].updated; }).forEach(([dev,rec])=>{
-      const g=rec.game; const st=deriveState(g.plays,g.settings);
+      const g=rec.game; const st0=deriveState(g.plays,g.settings);
+      const st=g.__ov?{...st0,home:g.__ov.home,away:g.__ov.away}:st0;
       const ago=Math.max(0,Math.round((Date.now()-rec.updated)/1000));
       const situ=st.awaitingPAT?'Point after':`${st.down}${['st','nd','rd','th'][Math.min(st.down,4)-1]} & ${posLabel(g,st.spot,st.possession)}`;
       const clockTag='';
@@ -2060,7 +2127,13 @@ function renderTourney(){
     fromLive.onclick=async()=>{ toast('Fetching from server…'); await fetchLive(true);
       let n=0;
       Object.values(liveGames).forEach(rec=>{ const g=rec.game;
-        if(g&&g.plays&&g.plays.length&&!tourneyGames.some(x=>x.id===g.id)){ tourneyGames.push(JSON.parse(JSON.stringify(g))); n++; } });
+        if(g&&g.plays&&g.plays.length&&!tourneyGames.some(x=>x.id===g.id)){
+          const copy=JSON.parse(JSON.stringify(g));
+          if(copy.__ov){ const d=deriveState(copy.plays,copy.settings);
+            const dh=copy.__ov.home-d.home, da=copy.__ov.away-d.away;
+            if(dh||da) copy.plays.push({type:'adjust',addHome:dh,addAway:da,_note:'admin correction'});
+            delete copy.__ov; }
+          tourneyGames.push(copy); n++; } });
       toast(n+' game(s) loaded from server'); render(); };
     imp.appendChild(fromLive);
   }
@@ -2074,7 +2147,11 @@ function renderTourney(){
   if(!tourneyGames.length) return;
 
   // standings
-  const standings=computeStandings(tourneyGames,Object.keys(teams));
+  const dd=dedupeFixtures(tourneyGames);
+  if(dd.dupes){
+    card.appendChild(h(`<div class="help" style="color:var(--amber);font-weight:700;margin-top:6px">⚠ ${dd.dupes} duplicate cop${dd.dupes===1?'y':'ies'} of the same fixture ignored (two devices logged the same game — the copy with more plays counts).</div>`));
+  }
+  const standings=computeStandings(dd.games,Object.keys(teams));
   if(standings.length){
     const sc=h(`<div class="card"><h3>Standings</h3></div>`);
     let t=`<table class="stTable"><thead><tr><th>Team</th><th>PLD</th><th>W</th><th>D</th><th>L</th><th>PCT</th><th>GF</th><th>GA</th><th>GD</th></tr></thead><tbody>`;
@@ -2082,7 +2159,7 @@ function renderTourney(){
     t+=`</tbody></table>`;
     sc.appendChild(h(t));
     sc.appendChild(h(`<div class="help" style="margin-top:6px">Win percentage (draws count half) · computed from loaded games only.</div>`));
-    const finals=tourneyGames.filter(g=>g.finished).length;
+    const finals=dd.games.filter(g=>g.finished).length;
     if(standings.length>=7 && finals>0){
       const bb=h(`<button class="btn sm green" style="margin-top:8px">Create Sunday bracket (3 QFs) on this device</button>`);
       bb.onclick=()=>{
@@ -2099,7 +2176,7 @@ function renderTourney(){
 
   // aggregate by team name + jersey
   const agg={}; // key team|num -> {team,num,name,line}
-  tourneyGames.forEach(g=>{
+  dd.games.forEach(g=>{
     const stats=computeStats(g);
     ['home','away'].forEach(side=>{
       const roster=rosterOf(g,side);
@@ -2250,6 +2327,8 @@ async function fetchLive(force){
         if(Array.isArray(arr)){
           arr.forEach(rec=>{ if(!rec||!rec.game) return;
             const k=String(rec.game.id||rec.device||''); if(!k||unsafeKey(k)) return;
+            if(rec.override&&rec.game){ rec.game.__ov={home:+rec.override.home||0,away:+rec.override.away||0};
+              rec.game.finished=!!rec.override.finished; }
             liveGames[k]=rec; });
           liveStatus='last check '+new Date().toLocaleTimeString()+' · '+arr.length+' broadcast(s) on server';
         } else if(arr!==null){ liveStatus='error: unexpected response shape'; }
@@ -2452,6 +2531,7 @@ applyPrefs();
 ensureWakeLock();
 applyTheme();
 switchTab(curTab);
+roleProbe();
 </script>
 <script>
 // Offline support (only over http/https, not file://). Network-first, so an online

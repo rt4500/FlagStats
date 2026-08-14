@@ -204,7 +204,7 @@ function toggleTheme(){
 }
 try{ applyTheme(localStorage.getItem('fs_live_theme')==='light'); }catch(e){ applyTheme(false); }
 function fmt(g){
-  const st=deriveState(g.plays,g.settings);
+  const st=scoreState(g);
   return {st};
 }
 /* Team totals: computed straight from the play list (numbers coerced — remote data). */
@@ -307,13 +307,26 @@ function render(){
 
 /* ---- Standings · Leaders · Bracket (from all received games) ---- */
 function allGames(){ return Object.values(live).map(r=>r.game).filter(g=>g&&g.plays&&g.plays.length); }
+function scoreState(g){ const st=deriveState(g.plays,g.settings);
+  return g.__ov ? {...st,home:g.__ov.home,away:g.__ov.away} : st; }
+function dedupedGames(){
+  const byKey={}, order=[];
+  allGames().forEach(g=>{
+    const key=(g.name||'')+'|'+g.teams.home.name+'|'+g.teams.away.name;
+    if(!byKey[key]){ byKey[key]=g; order.push(key); return; }
+    const cur=byKey[key];
+    if(!!g.finished!==!!cur.finished){ byKey[key]=g.finished?g:cur; return; }
+    if((g.plays||[]).length>(cur.plays||[]).length) byKey[key]=g;
+  });
+  return order.map(k=>byKey[k]);
+}
 function standingsRows(){
   const tbl={}; const row=n=>tbl[n]||(tbl[n]={team:n,pld:0,w:0,d:0,l:0,gf:0,ga:0});
   // seed every team seen in ANY broadcast game (even one still in progress) so the
   // table shows the whole field, not just teams with a finished result yet
-  allGames().forEach(g=>{ row(g.teams.home.name); row(g.teams.away.name); });
-  allGames().filter(g=>g.finished).forEach(g=>{
-    const st=deriveState(g.plays,g.settings);
+  dedupedGames().forEach(g=>{ row(g.teams.home.name); row(g.teams.away.name); });
+  dedupedGames().filter(g=>g.finished).forEach(g=>{
+    const st=scoreState(g);
     const H=row(g.teams.home.name), A=row(g.teams.away.name);
     H.pld++; A.pld++; H.gf+=st.home; H.ga+=st.away; A.gf+=st.away; A.ga+=st.home;
     if(st.home>st.away){H.w++;A.l++;} else if(st.home<st.away){A.w++;H.l++;} else {H.d++;A.d++;}
@@ -324,7 +337,7 @@ function standingsRows(){
 }
 function leaderRows(){
   const agg={};
-  allGames().forEach(g=>{
+  dedupedGames().forEach(g=>{
     const stats=computeStats(g);
     ['home','away'].forEach(side=>{
       const roster=g.teams[side].players||[];
@@ -351,7 +364,7 @@ function renderSchedule(){
     const label=day+' '+time+' · '+field;
     const g=findGame(label,home,away);
     let status='upcoming', score='';
-    if(g){ const st=deriveState(g.plays,g.settings);
+    if(g){ const st=scoreState(g);
       score=st.home+'–'+st.away;
       status=g.finished?'final':'live'; }
     return {day,time,field,home,away,status,score};
@@ -411,7 +424,7 @@ function renderTables(){
   const root=document.getElementById('tables'); if(!root) return;
   let html='';
   const st=standingsRows();
-  const finals=allGames().filter(g=>g.finished).length;
+  const finals=dedupedGames().filter(g=>g.finished).length;
   if(st.length){
     html+='<div class="card"><div class="teamHead" style="margin-top:0">Standings ('+finals+' of 21 group games final)</div>';
     html+='<table><thead><tr><th>Team</th><th>PLD</th><th>W</th><th>L</th><th>PCT</th><th>GD</th></tr></thead><tbody>';
@@ -468,6 +481,8 @@ async function poll(){
           return; }
         if(!rec.game) return;
         const k=String(rec.game.id||rec.device||''); if(!k||k==='__proto__'||k==='constructor'||k==='prototype') return;
+        if(rec.override&&rec.game){ rec.game.__ov={home:+rec.override.home||0,away:+rec.override.away||0};
+          rec.game.finished=!!rec.override.finished; }
         live[k]=rec; });
       el.textContent='last update '+new Date().toLocaleTimeString(); render(); }
   }catch(e){ el.innerHTML='<span class="err">offline — retrying…</span>'; }

@@ -64,6 +64,29 @@ export default {
     // Each key can only write inside its own device namespace, so a leaked
     // Field 1 key can never touch Field 2's games.
     // Legacy fallback: if KEYS is not set, the old single TOKEN variable is used.
+    if (req.method === 'PUT' && id && url.searchParams.get('override') === '1') {
+      // Admin result correction: merge an override into an EXISTING record, any namespace.
+      let keys = null;
+      try { keys = env.KEYS ? JSON.parse(env.KEYS) : null; } catch {}
+      const provided = url.searchParams.get('k') || '';
+      const role = keys ? (keys[provided] || null) : null;
+      if (role !== 'admin') return new Response('forbidden', { status: 403, headers: cors });
+      const slot = url.searchParams.get('slot') || '';
+      if (!/^g:[\w:-]{1,120}$/.test(slot)) return new Response('bad slot', { status: 400, headers: cors });
+      const cur = await env.LIVE.get(slot);
+      if (!cur) return new Response('not found', { status: 404, headers: cors });
+      let patch; try { patch = JSON.parse(await req.text()); } catch { return new Response('bad json', { status: 400, headers: cors }); }
+      let rec; try { rec = JSON.parse(cur); } catch { return new Response('corrupt slot', { status: 500, headers: cors }); }
+      if (patch && patch.override) {
+        rec.override = { home: Math.max(0, Math.min(199, (+patch.override.home) || 0)),
+                         away: Math.max(0, Math.min(199, (+patch.override.away) || 0)),
+                         finished: !!patch.override.finished };
+      } else { delete rec.override; }  // empty body clears the override
+      await env.LIVE.put(slot, JSON.stringify(rec), { expirationTtl: 60 * 60 * 24 * 7 });
+      memCache = { t: 0, body: null };
+      return new Response(JSON.stringify({ ok: true }), { headers: { ...cors, 'Content-Type': 'application/json' } });
+    }
+
     if (req.method === 'PUT' && id) {
       let keys = null;
       try { keys = env.KEYS ? JSON.parse(env.KEYS) : null; } catch {}
@@ -107,7 +130,11 @@ export default {
       } else if (env.TOKEN) {
         if (provided !== env.TOKEN) return new Response('forbidden', { status: 403, headers: cors });
       }
-      const storeKey = 'g:' + ns + id;   // a key can only delete inside its own namespace
+      let storeKey = 'g:' + ns + id;   // a key can only delete inside its own namespace
+      // admin role: may target any slot verbatim (for tournament-director cleanup)
+      const role = (() => { try { return env.KEYS ? (JSON.parse(env.KEYS)[provided] || null) : null; } catch { return null; } })();
+      const slotParam = url.searchParams.get('slot');
+      if (role === 'admin' && slotParam && /^g:[\w:-]{1,120}$/.test(slotParam)) storeKey = slotParam;
       await env.LIVE.delete(storeKey);
       const ids = await readIndex(env);
       const alive = ids.filter((k) => k !== storeKey);
@@ -130,7 +157,7 @@ export default {
       const out = []; const dead = [];
       for (const key of ids) {
         const v = await env.LIVE.get(key);
-        if (v) { try { out.push(JSON.parse(v)); } catch {} }
+        if (v) { try { const rec = JSON.parse(v); rec._slot = key; out.push(rec); } catch {} }
         else dead.push(key);                  // slot expired (7-day TTL)
       }
       if (dead.length) { const alive = ids.filter((k) => !dead.includes(k));
