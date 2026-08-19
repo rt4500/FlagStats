@@ -247,7 +247,7 @@ function setInputMode(m){ inputMode=m; store.save('fs_inputmode',m); render(); }
    that opens the app has live sync automatically — zero setup on the tablets. */
 const LIVE_CONFIG={
   url:'https://flagstats-live.trizzey11.workers.dev',
-  token:'prag2026-x7k9m2'
+  token:'' // legacy shared-token mode retired — keeper keys only
 };
 let deviceId=store.load('fs_device',null);
 if(!deviceId){ deviceId=Math.random().toString(36).slice(2,10)+Math.random().toString(36).slice(2,10); store.save('fs_device',deviceId); }
@@ -1073,7 +1073,7 @@ function defenderRow(g,defSide){
   wrap.appendChild(playerPicker(rosterOf(g,defSide),ui.pending.flagPullBy,pid=>{ui.pending.flagPullBy=pid;commit();}));
   return wrap;
 }
-const APP_VERSION='v54';
+const APP_VERSION='v55';
 const IOC_CODES={'Switzerland':'SUI','Ireland':'IRL','Sweden':'SWE','Ukraine':'UKR','Poland':'POL','Czechia':'CZE','Finland':'FIN','Germany':'GER','Austria':'AUT','France':'FRA','Italy':'ITA','Great Britain':'GBR'};
 /* Flag color stripes per nation — lets a spotter recognize the end zone by color,
    not just by reading the label. Ordered top-to-bottom as on the real flag. */
@@ -2387,7 +2387,7 @@ async function deviceCheck(){
         const j=await r.json();
         R(j&&j.ok?'ok':'fail','Keeper key', j&&j.ok?('valid · role: '+j.role):'REJECTED — open the current keeper link again');
       }catch(e){ R('warn','Keeper key','could not verify (offline?)'); }
-    } else R(LIVE_CONFIG.token?'warn':'warn','Keeper key', LIVE_CONFIG.token?'none — using legacy token':'none — viewer only (open a keeper link to broadcast)');
+    } else R('fail','Keeper key','none — this device cannot broadcast. Open its keeper link once.');
   } else R('warn','Live sync','not configured');
   // offline capability
   try{
