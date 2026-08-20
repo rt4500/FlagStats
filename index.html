@@ -253,6 +253,21 @@ let deviceId=store.load('fs_device',null);
 if(!deviceId){ deviceId=Math.random().toString(36).slice(2,10)+Math.random().toString(36).slice(2,10); store.save('fs_device',deviceId); }
 /* Keeper key: arrives once via a magic link (#k=...), then lives on the device.
    Devices without a key are read-only viewers — they never broadcast. */
+/* Front-door routing: the bare domain is for SPECTATORS. This full logging app is
+   only for devices that (a) hold a keeper key, (b) arrived via a keeper link, or
+   (c) explicitly asked for it once via ?app (remembered). Everyone else goes to
+   the public scoreboard. */
+{
+  const askedForApp = location.search.indexOf('app')>=0;
+  if(askedForApp){ try{ localStorage.setItem('fs_app_optin','1'); }catch(e){} }
+  let optin=false, hasKey=false;
+  try{ optin = localStorage.getItem('fs_app_optin')==='1';
+       hasKey = !!JSON.parse(localStorage.getItem('fs_writekey')||'""'); }catch(e){}
+  const viaKeeperLink = /[#&?]k=/.test(location.hash)||/[#&?]k=/.test(location.search);
+  if(!hasKey && !viaKeeperLink && !askedForApp && !optin){
+    location.replace('live.html'); throw new Error('redirecting to scoreboard');
+  }
+}
 let writeKey=store.load('fs_writekey','');
 let _keyJustSet=false;
 try{
@@ -1073,7 +1088,7 @@ function defenderRow(g,defSide){
   wrap.appendChild(playerPicker(rosterOf(g,defSide),ui.pending.flagPullBy,pid=>{ui.pending.flagPullBy=pid;commit();}));
   return wrap;
 }
-const APP_VERSION='v55';
+const APP_VERSION='v57';
 const IOC_CODES={'Switzerland':'SUI','Ireland':'IRL','Sweden':'SWE','Ukraine':'UKR','Poland':'POL','Czechia':'CZE','Finland':'FIN','Germany':'GER','Austria':'AUT','France':'FRA','Italy':'ITA','Great Britain':'GBR'};
 /* Flag color stripes per nation — lets a spotter recognize the end zone by color,
    not just by reading the label. Ordered top-to-bottom as on the real flag. */
@@ -1891,6 +1906,7 @@ function doDeleteGame(id){
   if(g && g.plays && g.plays.length && !g.practice){ saveTrash([g],(g.teams.home.name+' vs '+g.teams.away.name)); backupFile([g],'game'); }
   if(g) unbroadcast(g); // also take it off the live page
   games=games.filter(x=>x.id!==id); if(activeId===id)activeId=games[0]?.id||null;
+  tourneyGames=tourneyGames.filter(x=>x.id!==id); // and out of this device's roll-up/leaders
   persist(); render(); toast('Game deleted — Restore available');
 }
 /* Reset ONE game: wipe its plays but keep the fixture (teams, label, schedule slot).
@@ -1909,6 +1925,7 @@ function resetGamePlays(g){
         unbroadcast(g);
         g.plays=[]; g.finished=false; g.clock=null;
         delete g.exportedPlays; delete g._syncedPlays;
+        tourneyGames=tourneyGames.filter(x=>x.id!==g.id); // stale stats copy must go too
         persist(); render(); toast('Game reset — Restore available');
         setTimeout(()=>{ liveGames={}; fetchLive(true); },400);
       }},
@@ -2094,8 +2111,9 @@ function renderTourney(){
   // Auto-include this device's own played (non-practice) games so standings/leaders
   // work with zero taps. Deduped by id, so importing or live-loading won't double them.
   let autoAdded=0;
-  games.forEach(g=>{ if(g.practice || !g.plays || !g.plays.length) return;
+  games.forEach(g=>{ if(g.practice) return;
     const i=tourneyGames.findIndex(x=>x.id===g.id);
+    if(!g.plays || !g.plays.length){ if(i>=0) tourneyGames.splice(i,1); return; } // reset locally → drop the stale copy
     const copy=JSON.parse(JSON.stringify(g));
     if(i<0){ tourneyGames.push(copy); } else { tourneyGames[i]=copy; } // stay in step with live logging
     autoAdded++;
