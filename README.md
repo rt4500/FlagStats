@@ -10,6 +10,40 @@ No build step, no dependencies — it's just `index.html`.
 
 ---
 
+## Deploy to GitHub Pages
+
+You get a public URL you can open on any device. Two ways:
+
+### Option A — GitHub Actions (recommended, auto-deploys on every push)
+
+1. Create a new GitHub repo and push these files to the `main` branch.
+2. In the repo: **Settings → Pages → Build and deployment → Source → GitHub Actions**.
+3. That's it. Every push to `main` redeploys automatically (see the included
+   `.github/workflows/deploy.yml`). The live URL appears under **Settings → Pages**
+   and in the Actions run summary. It looks like:
+   `https://<your-username>.github.io/<repo-name>/`
+
+### Option B — Deploy from a branch (no Actions)
+
+1. Push these files to `main`.
+2. **Settings → Pages → Source → Deploy from a branch → `main` / `/ (root)` → Save.**
+3. Wait ~1 minute, then open the URL shown on that page.
+
+> First deploy can take a minute or two. After that, updates are near-instant.
+
+### Quick push from your machine
+
+```bash
+git init
+git add .
+git commit -m "Flag Stats app"
+git branch -M main
+git remote add origin https://github.com/<your-username>/<repo-name>.git
+git push -u origin main
+```
+
+---
+
 ## Install on a phone / tablet (offline app)
 
 Once the Pages URL is open in a browser:
@@ -86,6 +120,17 @@ MIT — see `LICENSE`.
 Reads are public (scores are public data); **writes require a keeper key** that
 arrives via a magic link and then lives on the device. Spectators and viewer
 phones open the plain app URL and can never write.
+
+Configure once:
+1. In the Cloudflare worker, set a variable **KEYS** with a JSON map of
+   key → device name, e.g.
+   `{"f1-7kq2m9x4":"field1","f2-3vp8n5t1":"field2","hub-9rw4c6z8":"hub"}`
+   (invent your own random keys). The old TOKEN variable can be deleted.
+2. Send each device its keeper link: `<app-URL>#k=<its-key>` — opened once,
+   the key is stored and the URL is cleaned. Options shows "Keeper link active".
+3. Each key can only write its own device namespace (enforced server-side), so
+   a leaked Field 1 key can never touch Field 2's games. Rotate a key by editing
+   KEYS and re-sending one link — **no app redeploy needed**.
 
 Without a `LIVE_CONFIG`, the app falls back to a manual JSONBin mode
 configurable in Options (API key + bin IDs per device).
