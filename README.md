@@ -8,6 +8,42 @@ tournament-wide stats.
 
 No build step, no dependencies — it's just `index.html`.
 
+---
+
+## Deploy to GitHub Pages
+
+You get a public URL you can open on any device. Two ways:
+
+### Option A — GitHub Actions (recommended, auto-deploys on every push)
+
+1. Create a new GitHub repo and push these files to the `main` branch.
+2. In the repo: **Settings → Pages → Build and deployment → Source → GitHub Actions**.
+3. That's it. Every push to `main` redeploys automatically (see the included
+   `.github/workflows/deploy.yml`). The live URL appears under **Settings → Pages**
+   and in the Actions run summary. It looks like:
+   `https://<your-username>.github.io/<repo-name>/`
+
+### Option B — Deploy from a branch (no Actions)
+
+1. Push these files to `main`.
+2. **Settings → Pages → Source → Deploy from a branch → `main` / `/ (root)` → Save.**
+3. Wait ~1 minute, then open the URL shown on that page.
+
+> First deploy can take a minute or two. After that, updates are near-instant.
+
+### Quick push from your machine
+
+```bash
+git init
+git add .
+git commit -m "Flag Stats app"
+git branch -M main
+git remote add origin https://github.com/<your-username>/<repo-name>.git
+git push -u origin main
+```
+
+---
+
 ## Install on a phone / tablet (offline app)
 
 Once the Pages URL is open in a browser:

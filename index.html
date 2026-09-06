@@ -1103,7 +1103,7 @@ function defenderRow(g,defSide){
   wrap.appendChild(playerPicker(rosterOf(g,defSide),ui.pending.flagPullBy,pid=>{ui.pending.flagPullBy=pid;commit();}));
   return wrap;
 }
-const APP_VERSION='v60';
+const APP_VERSION='v61';
 const IOC_CODES={'Switzerland':'SUI','Ireland':'IRL','Sweden':'SWE','Ukraine':'UKR','Poland':'POL','Czechia':'CZE','Finland':'FIN','Germany':'GER','Austria':'AUT','France':'FRA','Italy':'ITA','Great Britain':'GBR'};
 /* Flag color stripes per nation — lets a spotter recognize the end zone by color,
    not just by reading the label. Ordered top-to-bottom as on the real flag. */
@@ -1921,7 +1921,7 @@ function doDeleteGame(id){
   if(g && g.plays && g.plays.length && !g.practice){ saveTrash([g],(g.teams.home.name+' vs '+g.teams.away.name)); backupFile([g],'game'); }
   if(g) unbroadcast(g); // also take it off the live page
   games=games.filter(x=>x.id!==id); if(activeId===id)activeId=games[0]?.id||null;
-  tourneyGames=tourneyGames.filter(x=>x.id!==id); // and out of this device's roll-up/leaders
+  tourneyGames=tourneyGames.filter(x=>x.id!==id); persistTourney(); // and out of this device's roll-up/leaders
   persist(); render(); toast('Game deleted — Restore available');
 }
 /* Reset ONE game: wipe its plays but keep the fixture (teams, label, schedule slot).
@@ -1940,7 +1940,7 @@ function resetGamePlays(g){
         unbroadcast(g);
         g.plays=[]; g.finished=false; g.clock=null;
         delete g.exportedPlays; delete g._syncedPlays;
-        tourneyGames=tourneyGames.filter(x=>x.id!==g.id); // stale stats copy must go too
+        tourneyGames=tourneyGames.filter(x=>x.id!==g.id); persistTourney(); // stale stats copy must go too
         persist(); render(); toast('Game reset — Restore available');
         setTimeout(()=>{ liveGames={}; fetchLive(true); },400);
       }},
@@ -2046,7 +2046,8 @@ function buildTeamEditor(){
 /* ============================================================
    RENDER: TOURNAMENT (merge exported games)
    ============================================================ */
-let tourneyGames=[]; // imported game objects
+let tourneyGames=store.load('fs_tourney',[]); // persisted (was memory-only: a reload silently emptied the roll-up)
+function persistTourney(){ try{ store.save('fs_tourney',tourneyGames); }catch(e){ /* quota: exports still work */ } }
 /* Duplicate copies of the same fixture (two devices logged the same real-world game)
    must count ONCE. Key: fixture label + team pair. Among finished duplicates the copy
    with the most plays wins — it is the more complete record. */
@@ -2167,7 +2168,7 @@ function renderTourney(){
   input.onchange=async(e)=>{ let n=0, dup=0, bad=0;
     const addG=(g)=>{ if(!g||!g.teams||!g.plays){ bad++; return; }
       if(tourneyGames.some(x=>x.id&&x.id===g.id)){ dup++; return; }
-      tourneyGames.push(g); n++; };
+      tourneyGames.push(g); n++; persistTourney(); };
     for(const f of e.target.files){ try{ const obj=JSON.parse(await f.text());
       if(obj&&obj.type==='flagstats-bundle'&&Array.isArray(obj.games)) obj.games.forEach(addG);
       else addG(obj);
@@ -2178,7 +2179,7 @@ function renderTourney(){
     if(bad) parts.push(bad+' unreadable');
     toast(parts.length?parts.join(' · '):'Nothing to load'); render(); };
   const useLocal=h(`<button class="btn sm ghost">Add games from this device</button>`);
-  useLocal.onclick=()=>{ games.forEach(g=>{ if(!g.practice&&!tourneyGames.some(x=>x.id===g.id)) tourneyGames.push(JSON.parse(JSON.stringify(g))); }); render(); };
+  useLocal.onclick=()=>{ games.forEach(g=>{ if(!g.practice&&!tourneyGames.some(x=>x.id===g.id)) tourneyGames.push(JSON.parse(JSON.stringify(g))); }); persistTourney(); render(); };
   if(viewerConfigured()){
     const fromLive=h(`<button class="btn sm green">Load games from live server</button>`);
     fromLive.onclick=async()=>{ toast('Fetching from server…'); await fetchLive(true);
@@ -2190,14 +2191,25 @@ function renderTourney(){
             const dh=copy.__ov.home-d.home, da=copy.__ov.away-d.away;
             if(dh||da) copy.plays.push({type:'adjust',addHome:dh,addAway:da,_note:'admin correction'});
             delete copy.__ov; }
-          tourneyGames.push(copy); n++; } });
+          tourneyGames.push(copy); n++; } }); persistTourney();
       toast(n+' game(s) loaded from server'); render(); };
     imp.appendChild(fromLive);
   }
   const clr=h(`<button class="btn sm ghost">Clear imported</button>`);
-  clr.onclick=()=>{ const localIds=new Set(games.map(g=>g.id)); tourneyGames=tourneyGames.filter(g=>localIds.has(g.id)); render(); };
+  clr.onclick=()=>{ const localIds=new Set(games.map(g=>g.id)); tourneyGames=tourneyGames.filter(g=>localIds.has(g.id)); persistTourney(); render(); };
   imp.appendChild(fileBtn);imp.appendChild(useLocal);imp.appendChild(clr);imp.appendChild(input);
   card.appendChild(imp);
+  if(tourneyGames.length){
+    const arc=h(`<button class="btn sm ghost">Export archive file (for the website)</button>`);
+    arc.onclick=()=>{
+      const dd0=dedupeFixtures(tourneyGames);
+      const payload={type:'flagstats-archive',tournament:'Nations Cup Prague 2026',
+        updated:new Date().toISOString().slice(0,10),teams:realTeams(),games:dd0.games};
+      downloadBlob(JSON.stringify(payload),'archive.json','application/json');
+      toast(dd0.games.length+' game(s) exported — upload archive.json to the repo to publish');
+    };
+    card.appendChild(arc);
+  }
   card.appendChild(h(`<div class="help" style="margin-top:8px">${tourneyGames.length} game(s) in the roll-up${autoAdded?` (${autoAdded} from this device)`:''} · App ${APP_VERSION}</div>`));
   root.appendChild(card);
 

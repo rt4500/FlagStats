@@ -186,6 +186,26 @@ function posLabel(g,yard,off){ const L=g.settings.fieldLength, mid=g.settings.mi
 function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
 let live={}, expand={}, rosters={updated:0,teams:null}, rosterOpen={}, showAllSched=false;
+/* Permanent archive baseline: the relay deliberately expires entries after 7 days
+   (it is a LIVE-weekend tool). Long-term results live in a static archive.json in
+   this repo; the relay only overlays on top of it during live play. */
+let archive={loaded:false};
+async function loadArchive(){
+  try{
+    const r=await fetch('archive.json',{cache:'no-store'});
+    if(!r.ok) return;
+    const a=await r.json();
+    if(!a||a.type!=='flagstats-archive'||!Array.isArray(a.games)) return;
+    a.games.forEach(g=>{
+      if(!g||!g.id||!g.teams) return;
+      const k='arch:'+String(g.id);
+      if(k==='arch:__proto__'||k==='arch:constructor'||k==='arch:prototype') return;
+      live[k]={game:g,device:'archive',updated:0};
+    });
+    if(a.teams && !rosters.teams) rosters={updated:1,teams:a.teams};
+    archive.loaded=true; render();
+  }catch(e){}
+}
 const NC_SCHEDULE=[
  ['Fri 21.8','10:00','Field 1','Sweden','Ukraine'],['Fri 21.8','10:00','Field 2','Ireland','Czechia'],
  ['Fri 21.8','11:15','Field 1','Finland','Switzerland'],['Fri 21.8','11:15','Field 2','Ukraine','Poland'],
@@ -552,6 +572,7 @@ let pollTimer=null;
 function startPolling(){ if(pollTimer) return; poll(); pollTimer=setInterval(poll,30000); }
 function stopPolling(){ if(pollTimer){ clearInterval(pollTimer); pollTimer=null; } }
 document.addEventListener('visibilitychange',()=>{ document.visibilityState==='hidden'?stopPolling():startPolling(); });
+loadArchive();
 startPolling();
 </script>
 </body>
